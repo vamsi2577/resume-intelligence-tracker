@@ -30,7 +30,7 @@ htmlcov/
 .idea/
 *.swp
 *.swo
-
+.antigravity/
 # Alembic
 # Keep migrations, ignore compiled
 *.pyc

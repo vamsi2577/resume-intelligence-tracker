@@ -26,6 +26,7 @@ from src.schemas.application import (
 )
 from src.utils.exceptions import DuplicateError, NotFoundError
 from src.utils.logger import get_logger
+from src.utils.metrics import track_db_query
 
 logger = get_logger(__name__)
 
@@ -88,6 +89,7 @@ async def _check_duplicates(
 
 # ── Service functions ─────────────────────────────────────
 
+@track_db_query("create_application")
 async def create_application(
     db: AsyncSession,
     data: ApplicationCreateRequest,
@@ -125,6 +127,7 @@ async def create_application(
     return response
 
 
+@track_db_query("update_application")
 async def update_application(
     db: AsyncSession,
     application_id: uuid.UUID,
@@ -160,6 +163,7 @@ async def update_application(
     return ApplicationResponse.model_validate(app)
 
 
+@track_db_query("get_application_by_id")
 async def get_application_by_id(
     db: AsyncSession,
     application_id: uuid.UUID,
@@ -170,6 +174,7 @@ async def get_application_by_id(
     return ApplicationResponse.model_validate(app)
 
 
+@track_db_query("get_applications")
 async def get_applications(
     db: AsyncSession,
     filters: ApplicationFilters,
@@ -227,6 +232,7 @@ async def get_applications(
     )
 
 
+@track_db_query("get_status_history")
 async def get_status_history(
     db: AsyncSession,
     application_id: uuid.UUID,
