@@ -196,3 +196,37 @@ class ApplicationListResponse(BaseModel):
     data: list[ApplicationResponse]
     pagination: PaginationMeta
     meta: dict[str, Any] = {}
+
+
+# ── Filter / query contract ───────────────────────────────────
+
+class SortField(str, Enum):
+    applied_date = "applied_date"
+    updated_at = "updated_at"
+
+
+class SortDir(str, Enum):
+    asc = "asc"
+    desc = "desc"
+
+
+class ApplicationFilters(BaseModel):
+    """Typed query contract passed from route → service."""
+    company: list[str] = Field(default_factory=list)
+    status: list[ApplicationStatus] = Field(default_factory=list)
+    source: ApplicationSource | None = None
+    work_type: WorkType | None = None
+    job_title: str | None = None          # partial match
+    date_from: date | None = None
+    date_to: date | None = None
+    ids: list[uuid.UUID] = Field(default_factory=list)
+    page: int = Field(default=1, ge=1)
+    limit: int = Field(default=20, ge=1, le=100)
+    sort_by: SortField = SortField.applied_date
+    sort_dir: SortDir = SortDir.desc
+
+    @model_validator(mode="after")
+    def date_range_valid(self) -> "ApplicationFilters":
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from cannot be after date_to")
+        return self
