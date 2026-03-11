@@ -21,6 +21,7 @@ ApplicationStatusEnum = Enum(
     "applied",
     "screening",
     "interview",
+    "assessment",
     "offer",
     "rejected",
     "ghosted",

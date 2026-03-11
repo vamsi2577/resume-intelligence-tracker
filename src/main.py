@@ -3,7 +3,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from src.core.config import settings
 from src.utils.logger import configure_root_logger, get_logger
@@ -59,6 +61,15 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(applications_router)
     app.include_router(metrics_router)
+
+    # ── Dashboard ─────────────────────────────────────────
+    dashboard_dir = Path(__file__).parent.parent / "dashboard"
+    if dashboard_dir.exists():
+        app.mount("/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard")
+
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return FileResponse(str(dashboard_dir / "index.html"))
 
     # ── Global fallback exception handler ─────────────────
     @app.exception_handler(Exception)

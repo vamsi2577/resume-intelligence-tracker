@@ -26,6 +26,7 @@ class ApplicationStatus(str, Enum):
     applied = "applied"
     screening = "screening"
     interview = "interview"
+    assessment = "assessment"
     offer = "offer"
     rejected = "rejected"
     ghosted = "ghosted"
