@@ -42,10 +42,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # ── Routers (registered here as modules are built) ───
-    # from src.api.health import router as health_router
+    # ── Routers ───────────────────────────────────────────
+    from src.api.health import router as health_router
+    app.include_router(health_router)
+
     # from src.api.applications import router as applications_router
-    # app.include_router(health_router, tags=["health"])
     # app.include_router(applications_router, prefix="/api/v1", tags=["applications"])
 
     # ── Global exception handler ─────────────────────────
