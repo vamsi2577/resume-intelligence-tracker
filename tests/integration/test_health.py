@@ -7,19 +7,7 @@ Requires a running PostgreSQL container:
 Run:  pytest tests/integration/test_health.py -v
 """
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, patch
-
-from src.main import app
-
-BASE_URL = "http://test"
-
-
-@pytest_asyncio.fixture
-async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE_URL) as c:
-        yield c
 
 
 # ── Live DB tests (requires docker-compose up) ────────────
