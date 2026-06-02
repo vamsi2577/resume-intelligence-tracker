@@ -43,9 +43,11 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.ALLOWED_ORIGINS,
+        allow_origin_regex=settings.ALLOWED_ORIGIN_REGEX or None,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Application-Id", "X-Duplicate-Warning", "X-Metadata"],
     )
 
     # ── Exception handlers ────────────────────────────────
@@ -57,10 +59,24 @@ def create_app() -> FastAPI:
     from src.api.health import router as health_router
     from src.api.applications import router as applications_router
     from src.api.metrics import router as metrics_router
+    from src.api.resume_generator import router as resume_generator_router
+    from src.api.base_resume import router as base_resume_router
 
     app.include_router(health_router)
     app.include_router(applications_router)
     app.include_router(metrics_router)
+    app.include_router(resume_generator_router)
+    app.include_router(base_resume_router)
+
+    # Email watcher (n8n integration) is optional. Disabled by default
+    # in the unified product; flip ENABLE_EMAIL_WATCHER=true to expose
+    # POST /api/v1/applications/email-event.
+    if settings.ENABLE_EMAIL_WATCHER:
+        from src.api.email_watcher import router as email_watcher_router
+        app.include_router(email_watcher_router)
+        logger.info("Email watcher router enabled")
+    else:
+        logger.info("Email watcher router disabled (ENABLE_EMAIL_WATCHER=false)")
 
     # ── Dashboard ─────────────────────────────────────────
     dashboard_dir = Path(__file__).parent.parent / "dashboard"

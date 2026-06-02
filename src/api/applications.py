@@ -15,6 +15,7 @@ from datetime import date
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,7 @@ from src.schemas.application import (
     ApplicationUpdateRequest,
     SortDir,
     SortField,
+    StatsResponse,
     StatusHistoryResponse,
     WorkType,
 )
@@ -47,9 +49,12 @@ def _parse_filters(
     source: Annotated[Optional[ApplicationSource], Query()] = None,
     work_type: Annotated[Optional[WorkType], Query()] = None,
     job_title: Annotated[Optional[str], Query()] = None,
+    search: Annotated[Optional[str], Query()] = None,
     date_from: Annotated[Optional[date], Query()] = None,
     date_to: Annotated[Optional[date], Query()] = None,
     ids: Annotated[Optional[List[uuid.UUID]], Query()] = None,
+    needs_review: Annotated[Optional[bool], Query()] = None,
+    include_deleted: Annotated[bool, Query()] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     sort_by: Annotated[SortField, Query()] = SortField.applied_date,
@@ -62,9 +67,12 @@ def _parse_filters(
             source=source,
             work_type=work_type,
             job_title=job_title,
+            search=search,
             date_from=date_from,
             date_to=date_to,
             ids=ids or [],
+            needs_review=needs_review,
+            include_deleted=include_deleted,
             page=page,
             limit=limit,
             sort_by=sort_by,
@@ -106,6 +114,17 @@ async def update_application(
 
 
 @router.get(
+    "/applications/stats",
+    response_model=StatsResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_stats(
+    db: AsyncSession = Depends(get_db),
+):
+    return await application_service.get_stats(db)
+
+
+@router.get(
     "/applications",
     response_model=ApplicationListResponse,
     status_code=status.HTTP_200_OK,
@@ -139,3 +158,46 @@ async def get_application_history(
     db: AsyncSession = Depends(get_db),
 ):
     return await application_service.get_status_history(db, application_id)
+
+
+@router.delete(
+    "/applications/{application_id}",
+    response_model=ApplicationResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def soft_delete_application(
+    application_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-delete: marks `is_deleted=true`. List endpoint hides it by
+    default; pass `?include_deleted=true` to recover."""
+    return await application_service.delete_application(db, application_id)
+
+
+@router.get(
+    "/applications/{application_id}/resume",
+    response_class=StreamingResponse,
+)
+async def download_application_resume(
+    application_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-render the stored résumé JSON as a DOCX for download.
+
+    Only works on applications created via the résumé generator
+    (those have `resume_content` populated). Returns 404 otherwise.
+    """
+    # Local import — avoids a top-level cycle with resume_generator paths
+    # and keeps the docx dependency optional for callers who don't use it.
+    from src.schemas.resume_generator import ResumeRequest
+    from src.utils.docx_builder import build_docx, build_filename
+
+    content = await application_service.get_resume_content(db, application_id)
+    payload = ResumeRequest.model_validate(content)
+    docx_stream = build_docx(payload)
+    filename = build_filename(payload)
+    return StreamingResponse(
+        docx_stream,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

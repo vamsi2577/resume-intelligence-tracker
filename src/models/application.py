@@ -10,6 +10,7 @@ from datetime import date, datetime
 
 import sqlalchemy as sa
 from sqlalchemy import Date, Enum, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,7 +65,9 @@ class JobApplication(Base):
     # ── Optional fields ───────────────────────────────────
     job_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     job_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    job_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     resume_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    resume_content: Mapped[dict | None] = mapped_column(JSONB(), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     salary_range: Mapped[str | None] = mapped_column(String(100), nullable=True)
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -73,6 +76,8 @@ class JobApplication(Base):
     contact_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     follow_up_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    needs_review: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default="false")
+    is_deleted: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default="false")
 
     # ── Relationship ──────────────────────────────────────
     status_history: Mapped[list["ApplicationStatusHistory"]] = relationship(
@@ -88,6 +93,7 @@ class JobApplication(Base):
         Index("ix_job_applications_status", "status"),
         Index("ix_job_applications_applied_date", "applied_date"),
         Index("ix_job_applications_company_job_id", "company_name", "job_id"),
+        Index("ix_job_applications_is_deleted", "is_deleted"),
     )
 
     def __repr__(self) -> str:

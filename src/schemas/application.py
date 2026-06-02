@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Dict
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -76,7 +76,9 @@ class ApplicationCreateRequest(BaseModel):
     status: ApplicationStatus = ApplicationStatus.applied
     job_url: str | None = None
     job_id: str | None = Field(default=None, max_length=100)
+    job_description: str | None = None
     resume_version: str | None = Field(default=None, max_length=50)
+    resume_content: dict | None = None
     notes: str | None = None
     salary_range: str | None = Field(default=None, max_length=100)
     location: str | None = Field(default=None, max_length=255)
@@ -85,16 +87,12 @@ class ApplicationCreateRequest(BaseModel):
     contact_name: str | None = Field(default=None, max_length=255)
     contact_email: EmailStr | None = None
     follow_up_date: date | None = None
+    needs_review: bool = False
 
     @field_validator("applied_date")
     @classmethod
     def applied_date_not_future(cls, v: date) -> date:
         return _validate_not_future(v, "applied_date")
-
-    @field_validator("follow_up_date")
-    @classmethod
-    def follow_up_date_not_future(cls, v: date | None) -> date | None:
-        return _validate_not_future(v, "follow_up_date")
 
     @field_validator("job_url")
     @classmethod
@@ -113,7 +111,9 @@ class ApplicationUpdateRequest(BaseModel):
     applied_date: date | None = None
     job_url: str | None = None
     job_id: str | None = Field(default=None, max_length=100)
+    job_description: str | None = None
     resume_version: str | None = Field(default=None, max_length=50)
+    resume_content: dict | None = None
     notes: str | None = None
     salary_range: str | None = Field(default=None, max_length=100)
     location: str | None = Field(default=None, max_length=255)
@@ -122,16 +122,12 @@ class ApplicationUpdateRequest(BaseModel):
     contact_name: str | None = Field(default=None, max_length=255)
     contact_email: EmailStr | None = None
     follow_up_date: date | None = None
+    needs_review: bool | None = None
 
     @field_validator("applied_date")
     @classmethod
     def applied_date_not_future(cls, v: date | None) -> date | None:
         return _validate_not_future(v, "applied_date")
-
-    @field_validator("follow_up_date")
-    @classmethod
-    def follow_up_date_not_future(cls, v: date | None) -> date | None:
-        return _validate_not_future(v, "follow_up_date")
 
     @field_validator("job_url")
     @classmethod
@@ -172,7 +168,9 @@ class ApplicationResponse(BaseModel):
     applied_date: date
     job_url: str | None
     job_id: str | None
+    job_description: str | None
     resume_version: str | None
+    resume_content: dict | None
     notes: str | None
     salary_range: str | None
     location: str | None
@@ -181,6 +179,7 @@ class ApplicationResponse(BaseModel):
     contact_name: str | None
     contact_email: str | None
     follow_up_date: date | None
+    needs_review: bool
     created_at: datetime
     updated_at: datetime
     duplicate_warning: bool = False
@@ -199,11 +198,35 @@ class ApplicationListResponse(BaseModel):
     meta: dict[str, Any] = {}
 
 
+class WeeklyTrendPoint(BaseModel):
+    week: date
+    count: int
+
+
+class SourceBreakdown(BaseModel):
+    manual: int
+    resume_generator: int
+
+
+class StatsResponse(BaseModel):
+    total: int
+    interview: int
+    rejected: int
+    offer: int
+    needs_review: int
+    ats_pass_rate: float
+    source_breakdown: SourceBreakdown
+    weekly_trend: list[WeeklyTrendPoint]
+
+
 # ── Filter / query contract ───────────────────────────────────
 
 class SortField(str, Enum):
     applied_date = "applied_date"
     updated_at = "updated_at"
+    company_name = "company_name"
+    status = "status"
+    job_title = "job_title"
 
 
 class SortDir(str, Enum):
@@ -217,9 +240,12 @@ class ApplicationFilters(BaseModel):
     status: list[ApplicationStatus] = Field(default_factory=list)
     source: ApplicationSource | None = None
     work_type: WorkType | None = None
+    search: str | None = None           # ILIKE on company_name OR job_title
     job_title: str | None = None          # partial match
     date_from: date | None = None
     date_to: date | None = None
+    needs_review: bool | None = None
+    include_deleted: bool = False        # if false, hides soft-deleted rows
     ids: list[uuid.UUID] = Field(default_factory=list)
     page: int = Field(default=1, ge=1)
     limit: int = Field(default=20, ge=1, le=100)

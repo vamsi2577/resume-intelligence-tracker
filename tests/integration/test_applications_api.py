@@ -211,6 +211,31 @@ class TestGetApplication:
         assert resp.status_code == 422
 
 
+# ── GET /api/v1/applications/stats ──────────────────────
+
+class TestGetStats:
+    @pytest.mark.asyncio
+    async def test_returns_200_with_all_fields(self, client):
+        from src.schemas.application import StatsResponse
+        mock = StatsResponse(total=10, interview=2, rejected=3, offer=1, needs_review=4)
+        with patch("src.api.applications.application_service.get_stats",
+                   new_callable=AsyncMock, return_value=mock):
+            resp = await client.get("/api/v1/applications/stats")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert set(body.keys()) == {"total", "interview", "rejected", "offer", "needs_review"}
+
+    @pytest.mark.asyncio
+    async def test_returns_zeros_when_no_data(self, client):
+        from src.schemas.application import StatsResponse
+        mock = StatsResponse(total=0, interview=0, rejected=0, offer=0, needs_review=0)
+        with patch("src.api.applications.application_service.get_stats",
+                   new_callable=AsyncMock, return_value=mock):
+            resp = await client.get("/api/v1/applications/stats")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+
 # ── GET /api/v1/applications/{id}/history ────────────────
 
 class TestGetApplicationHistory:

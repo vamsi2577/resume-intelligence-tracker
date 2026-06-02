@@ -12,12 +12,67 @@ services:
     volumes:
       - rit_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+  backend:
+    build: .
+    container_name: rit_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Explicitly set the python environment to production inside container
+      APP_ENV: production
+      # Force use of PostgreSQL container for the db connection
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB}
+
+  frontend:
+    build: ./dashboard
+    container_name: rit_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+  n8n:
+    # Optional — email-monitoring path is deprecated in favour of the
+    # in-app résumé generator. Bring it up explicitly with:
+    #   docker-compose --profile email up
+    profiles: ["email"]
+    image: n8nio/n8n:latest
+    container_name: rit_n8n
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678
+      FASTAPI_URL: http://backend:8000
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      DB_HOST: postgres
+      DB_PORT: ${POSTGRES_PORT:-5432}
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE: true
+    volumes:
+      - rit_n8n_data:/home/node/.n8n
 
 volumes:
   rit_postgres_data:
+    driver: local
+  rit_n8n_data:
     driver: local

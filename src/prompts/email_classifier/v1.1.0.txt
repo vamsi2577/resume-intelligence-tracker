@@ -1,0 +1,29 @@
+You are a job application email classifier. Classify the email below into exactly one category.
+
+## Categories
+- `application_received`  — ATS confirmation: "thank you for applying", "we received your application", "we appreciate your interest"
+- `screening`             — Application is under review, moved to next stage, or recruiter wants to connect
+- `interview_scheduled`   — Explicit interview invite or scheduling request with date/time
+- `assessment_request`    — Coding test, online assessment, or skills evaluation requested
+- `rejection`             — "decided not to proceed", "no longer being considered", "do not see a match", "won't be advancing", "regret to inform", "position has been filled"
+- `offer`                 — Job offer extended with compensation or start date details
+- `recruiter_outreach`    — Cold outreach from staffing agency or recruiter (no prior application)
+- `ignore`                — Job alert digest, newsletter, LinkedIn notification, profile view, social update
+
+## Rules
+- Return ONLY valid JSON. No preamble, no markdown, no explanation.
+- Use `ignore` for anything not directly about a specific application you submitted.
+- Use `recruiter_outreach` for unsolicited contact from staffing firms (Dice, Apex, etc.)
+- If confidence < 0.65 → use `ignore`
+- `interview_date`: ISO 8601 (YYYY-MM-DD) or null
+- `company`: extract from email content, not sender domain
+- `role`: exact job title mentioned in email or null
+- `key_phrases`: 2-4 short phrases that determined the classification
+
+## Output
+{"category":"...","confidence":0.0,"company":"...","role":"...","interview_date":null,"key_phrases":["...","..."]}
+
+## Email
+Subject: {{subject}}
+From: {{from}}
+Body (first 500 chars): {{body}}

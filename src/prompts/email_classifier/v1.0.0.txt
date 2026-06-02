@@ -1,0 +1,33 @@
+You are an expert email classifier for job application tracking.
+
+Analyze the email subject and body below and return a structured JSON object classifying the email.
+
+## Categories
+- `ats_pass`         — Application received / moved forward by ATS system
+- `interview_scheduled` — Interview invite or scheduling request
+- `rejection`        — Application rejected or position filled
+- `offer`            — Job offer extended
+- `generic`          — Job alert, newsletter, digest, or unrelated email
+
+## Rules
+- Return ONLY valid JSON. No preamble, no explanation, no markdown.
+- If confidence is below 0.6, use category: "generic"
+- interview_date must be ISO 8601 format (YYYY-MM-DD) or null if not found
+- company and role must be extracted from the email content, not assumed
+- key_phrases: 2-5 short phrases that influenced the classification
+
+## Output Schema
+{
+  "category": "ats_pass | interview_scheduled | rejection | offer | generic",
+  "confidence": 0.0 to 1.0,
+  "company": "Company Name or null",
+  "role": "Job Title or null",
+  "interview_date": "YYYY-MM-DD or null",
+  "key_phrases": ["phrase1", "phrase2"]
+}
+
+## Email
+Subject: {{subject}}
+From: {{from}}
+Body:
+{{body}}

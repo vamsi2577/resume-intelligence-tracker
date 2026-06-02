@@ -283,6 +283,60 @@ class TestGetApplications:
             )
 
 
+# ── get_stats ────────────────────────────────────────────
+
+class TestGetStats:
+    """get_stats now issues three queries: headline counts, source breakdown,
+    weekly trend. Tests mock all three via db.execute side_effect."""
+
+    @staticmethod
+    def _mock_execute_for(counts_row, source_rows, trend_rows):
+        counts_result = MagicMock(); counts_result.one = MagicMock(return_value=counts_row)
+        source_result = MagicMock(); source_result.all = MagicMock(return_value=source_rows)
+        trend_result = MagicMock(); trend_result.all = MagicMock(return_value=trend_rows)
+        return AsyncMock(side_effect=[counts_result, source_result, trend_result])
+
+    @pytest.mark.asyncio
+    async def test_returns_stats_response(self):
+        from src.services.application_service import get_stats
+        db = AsyncMock()
+        counts = MagicMock(
+            total=5, interview=1, assessment=1, rejected=2, offer=1, needs_review=1
+        )
+        source_rows = [("manual", 2), ("resume_generator", 3)]
+        trend_rows = [(date(2026, 5, 18), 3), (date(2026, 5, 25), 2)]
+        db.execute = self._mock_execute_for(counts, source_rows, trend_rows)
+
+        stats = await get_stats(db)
+        assert stats.total == 5
+        assert stats.interview == 1
+        assert stats.rejected == 2
+        assert stats.offer == 1
+        assert stats.needs_review == 1
+        # ATS pass rate = (assessment + interview + offer) / total = 3/5
+        assert stats.ats_pass_rate == pytest.approx(0.6)
+        assert stats.source_breakdown.manual == 2
+        assert stats.source_breakdown.resume_generator == 3
+        assert len(stats.weekly_trend) == 2
+        assert stats.weekly_trend[0].count == 3
+
+    @pytest.mark.asyncio
+    async def test_returns_zeros_when_empty(self):
+        from src.services.application_service import get_stats
+        db = AsyncMock()
+        counts = MagicMock(
+            total=0, interview=0, assessment=0, rejected=0, offer=0, needs_review=0
+        )
+        db.execute = self._mock_execute_for(counts, [], [])
+
+        stats = await get_stats(db)
+        assert stats.total == 0
+        assert stats.ats_pass_rate == 0.0
+        assert stats.source_breakdown.manual == 0
+        assert stats.source_breakdown.resume_generator == 0
+        assert stats.weekly_trend == []
+
+
 # ── get_status_history ────────────────────────────────────
 
 class TestGetStatusHistory:

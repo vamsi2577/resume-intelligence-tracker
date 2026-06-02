@@ -1,14 +1,30 @@
-export function Header({ stats, activeCount }) {
+export function Header({ stats, activeCount, activeTab, onTabChange }) {
   const { total = '-', interview = '-', rejected = '-', offer = '-' } = stats || {};
   return (
     <header>
       <div className="header-left">
-        <div className="header-tag">Resume Intelligence · Phase 1</div>
+        <div className="header-tag">Resume Intelligence · Phase 2</div>
         <h1>Application <span>Tracker</span></h1>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
+
+      <div className="header-center">
+        <button
+          className={`tab-btn ${activeTab === 'tracker' ? 'active' : ''}`}
+          onClick={() => onTabChange('tracker')}
+        >
+          ◈ Tracker
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'resume' ? 'active' : ''}`}
+          onClick={() => onTabChange('resume')}
+        >
+          ⟡ Resume Generator
+        </button>
+      </div>
+
+      <div className="header-right">
         {activeCount > 0 && (
-          <div id="needsReviewBadge" className="nr-badge">
+          <div className="nr-badge">
             <div className="nr-dot"></div>
             <span>{activeCount}</span> needs review
           </div>
@@ -26,7 +42,7 @@ export function Header({ stats, activeCount }) {
             <div className="val">{rejected}</div>
             <div className="lbl">Rejected</div>
           </div>
-          <div className="stat-chip needs-review">
+          <div className="stat-chip offers">
             <div className="val">{offer}</div>
             <div className="lbl">Offers</div>
           </div>

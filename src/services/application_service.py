@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import math
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.application import ApplicationStatusHistory, JobApplication
@@ -22,7 +22,10 @@ from src.schemas.application import (
     ApplicationUpdateRequest,
     PaginationMeta,
     SortDir,
+    StatsResponse,
     StatusHistoryResponse,
+    WeeklyTrendPoint,
+    SourceBreakdown,
 )
 from src.utils.exceptions import DuplicateError, NotFoundError
 from src.utils.logger import get_logger
@@ -61,11 +64,13 @@ async def _check_duplicates(
     Returns True if a soft duplicate warning should be raised.
     Raises DuplicateError for hard duplicates (company + job_id).
     """
-    # Hard duplicate: same company + job_id
+    # Hard duplicate: same company + job_id (ignore soft-deleted rows so
+    # the user can re-apply after deleting the old entry).
     if job_id:
         stmt = select(JobApplication).where(
             JobApplication.company_name == company_name,
             JobApplication.job_id == job_id,
+            JobApplication.is_deleted == False,  # noqa: E712
         )
         if exclude_id:
             stmt = stmt.where(JobApplication.id != exclude_id)
@@ -79,6 +84,7 @@ async def _check_duplicates(
         JobApplication.company_name == company_name,
         JobApplication.job_title == job_title,
         JobApplication.applied_date == applied_date,
+        JobApplication.is_deleted == False,  # noqa: E712
     )
     if exclude_id:
         stmt = stmt.where(JobApplication.id != exclude_id)
@@ -192,12 +198,24 @@ async def get_applications(
         stmt = stmt.where(JobApplication.work_type == filters.work_type.value)
     if filters.job_title:
         stmt = stmt.where(JobApplication.job_title.ilike(f"%{filters.job_title}%"))
+    if filters.search:
+        pattern = f"%{filters.search}%"
+        stmt = stmt.where(
+            or_(
+                JobApplication.company_name.ilike(pattern),
+                JobApplication.job_title.ilike(pattern),
+            )
+        )
+    if not filters.include_deleted:
+        stmt = stmt.where(JobApplication.is_deleted == False)  # noqa: E712
     if filters.date_from:
         stmt = stmt.where(JobApplication.applied_date >= filters.date_from)
     if filters.date_to:
         stmt = stmt.where(JobApplication.applied_date <= filters.date_to)
     if filters.ids:
         stmt = stmt.where(JobApplication.id.in_(filters.ids))
+    if filters.needs_review is not None:
+        stmt = stmt.where(JobApplication.needs_review == filters.needs_review)
 
     # ── Total count ───────────────────────────────────────
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -230,6 +248,127 @@ async def get_applications(
             total_pages=total_pages,
         ),
     )
+
+
+@track_db_query("get_stats")
+async def get_stats(db: AsyncSession) -> StatsResponse:
+    """Aggregated dashboard metrics. Soft-deleted rows are excluded."""
+    base_where = JobApplication.is_deleted == False  # noqa: E712
+
+    # ── 1. Headline counts ────────────────────────────────
+    counts_stmt = select(
+        func.count().label("total"),
+        func.count().filter(JobApplication.status == "interview").label("interview"),
+        func.count().filter(JobApplication.status == "assessment").label("assessment"),
+        func.count().filter(JobApplication.status == "rejected").label("rejected"),
+        func.count().filter(JobApplication.status == "offer").label("offer"),
+        func.count().filter(JobApplication.needs_review == True).label("needs_review"),
+    ).select_from(JobApplication).where(base_where)
+    row = (await db.execute(counts_stmt)).one()
+
+    # ── 2. Source breakdown ───────────────────────────────
+    src_stmt = (
+        select(JobApplication.source, func.count())
+        .where(base_where)
+        .group_by(JobApplication.source)
+    )
+    src_rows = (await db.execute(src_stmt)).all()
+    src_counts = {src: cnt for src, cnt in src_rows}
+    source_breakdown = SourceBreakdown(
+        manual=src_counts.get("manual", 0),
+        resume_generator=src_counts.get("resume_generator", 0),
+    )
+
+    # ── 3. Weekly trend (last 12 ISO weeks) ───────────────
+    today = date.today()
+    twelve_weeks_ago = today - timedelta(weeks=11)  # inclusive of current week
+    trend_stmt = (
+        select(
+            func.date_trunc("week", JobApplication.applied_date).label("week"),
+            func.count().label("count"),
+        )
+        .where(base_where)
+        .where(JobApplication.applied_date >= twelve_weeks_ago)
+        .group_by("week")
+        .order_by("week")
+    )
+    trend_rows = (await db.execute(trend_stmt)).all()
+    weekly_trend = [
+        WeeklyTrendPoint(
+            # date_trunc returns a datetime; .date() flattens for the schema
+            week=(w.date() if hasattr(w, "date") else w),
+            count=c,
+        )
+        for w, c in trend_rows
+    ]
+
+    # ── 4. ATS pass rate ──────────────────────────────────
+    # Fraction of applications that advanced past initial screening, i.e.
+    # reached assessment / interview / offer. Useful as a leading indicator
+    # of résumé fit. Zero on empty data.
+    advanced = row.assessment + row.interview + row.offer
+    ats_pass_rate = (advanced / row.total) if row.total else 0.0
+
+    logger.info(
+        "Stats fetched",
+        extra={"total": row.total, "ats_pass_rate": ats_pass_rate},
+    )
+    return StatsResponse(
+        total=row.total,
+        interview=row.interview,
+        rejected=row.rejected,
+        offer=row.offer,
+        needs_review=row.needs_review,
+        ats_pass_rate=ats_pass_rate,
+        source_breakdown=source_breakdown,
+        weekly_trend=weekly_trend,
+    )
+
+
+@track_db_query("delete_application")
+async def delete_application(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+) -> ApplicationResponse:
+    """Soft-delete: set is_deleted=true and append a history note.
+
+    Hard deletes are intentionally not exposed; callers can re-list with
+    ApplicationFilters.include_deleted=True to recover a row.
+    """
+    app = await db.get(JobApplication, application_id)
+    if not app:
+        raise NotFoundError("Application", str(application_id))
+    if app.is_deleted:
+        # Idempotent: deleting an already-deleted row is a no-op.
+        return ApplicationResponse.model_validate(app)
+
+    app.is_deleted = True
+    app.updated_at = _utcnow()
+    db.add(_make_history(app.id, app.status, note="Soft-deleted"))
+    await db.flush()
+    await db.refresh(app)
+
+    logger.info("Application soft-deleted", extra={"application_id": str(app.id)})
+    return ApplicationResponse.model_validate(app)
+
+
+@track_db_query("get_application_resume_content")
+async def get_resume_content(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+) -> dict:
+    """Return the stored ResumeRequest JSON for re-rendering as DOCX.
+
+    Raises NotFoundError if the application doesn't exist or was logged
+    without `resume_content` (e.g. created via the manual `log-application`
+    flow, no résumé generation).
+    """
+    app = await db.get(JobApplication, application_id)
+    if not app:
+        raise NotFoundError("Application", str(application_id))
+    if not app.resume_content:
+        raise NotFoundError("ResumeContent", str(application_id))
+    return app.resume_content
 
 
 @track_db_query("get_status_history")
