@@ -46,6 +46,7 @@ export function Table({ data, loading, selectedId, onRowClick, sort, onSort }) {
           <th>Source</th>
           <th>Type</th>
           <th>Location</th>
+          <th aria-label="Job link"></th>
         </tr>
       </thead>
       <tbody id="tableBody">
@@ -62,6 +63,21 @@ export function Table({ data, loading, selectedId, onRowClick, sort, onSort }) {
             <td>{app.source || '–'}</td>
             <td>{app.work_type ? <span className="work-type-tag">{app.work_type}</span> : '–'}</td>
             <td>{app.location || '–'}</td>
+            <td onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center' }}>
+              {app.job_url ? (
+                <a
+                  href={app.job_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={app.job_url}
+                  style={{ textDecoration: 'none' }}
+                >
+                  ↗
+                </a>
+              ) : (
+                <span style={{ color: 'var(--muted)' }}>–</span>
+              )}
+            </td>
           </tr>
         ))}
       </tbody>
