@@ -45,9 +45,9 @@ class ResumeRequest(BaseModel):
     job_title: str = Field(..., min_length=1, max_length=255)
     job_description: Optional[str] = None
 
-    # ── Personal info (defaults to Vamsi's info) ─────────
-    full_name: str = "REDACTED NAME"
-    contact_info: str = "+1 (555) 555-5555 | REDACTED@example.com | linkedin.com/in/REDACTED/"
+    # ── Personal info (no hard-coded default; caller supplies, empty string allowed) ─────
+    full_name: str = Field(default="", max_length=255)
+    contact_info: str = Field(default="", max_length=512)
 
     # ── Resume sections ───────────────────────────────────
     summary: Optional[SummaryObject] = None

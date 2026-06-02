@@ -31,6 +31,8 @@ def _minimal_request(**overrides) -> ResumeRequest:
         target_company="Acme Corp",
         job_title="Senior Software Engineer",
         job_description="We are looking for a senior engineer...",
+        full_name="Test User",
+        contact_info="test@example.com",
     )
     base.update(overrides)
     return ResumeRequest(**base)
@@ -41,6 +43,8 @@ def _full_request() -> ResumeRequest:
         target_company="Acme Corp",
         job_title="Senior Software Engineer",
         job_description="Full JD text here...",
+        full_name="Test User",
+        contact_info="test@example.com",
         summary=SummaryObject(
             summary_text="Experienced engineer specializing in **cloud** systems.",
             summary_points=["Expert in **Python** and **FastAPI**."],
@@ -237,7 +241,12 @@ class TestResumeRequestSchema:
             ResumeRequest(target_company="Acme")
 
     def test_job_description_optional(self):
-        req = ResumeRequest(target_company="Acme", job_title="Engineer")
+        req = ResumeRequest(
+            target_company="Acme",
+            job_title="Engineer",
+            full_name="Test User",
+            contact_info="test@example.com",
+        )
         assert req.job_description is None
 
     def test_full_request_valid(self):
@@ -251,9 +260,19 @@ class TestResumeRequestSchema:
     def test_empty_company_rejected(self):
         from pydantic import ValidationError
         with pytest.raises(ValidationError):
-            ResumeRequest(target_company="", job_title="Engineer")
+            ResumeRequest(
+                target_company="",
+                job_title="Engineer",
+                full_name="Test User",
+                contact_info="test@example.com",
+            )
 
     def test_empty_job_title_rejected(self):
         from pydantic import ValidationError
         with pytest.raises(ValidationError):
-            ResumeRequest(target_company="Acme", job_title="")
+            ResumeRequest(
+                target_company="Acme",
+                job_title="",
+                full_name="Test User",
+                contact_info="test@example.com",
+            )
