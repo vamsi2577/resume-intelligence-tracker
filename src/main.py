@@ -47,7 +47,13 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["X-Application-Id", "X-Duplicate-Warning", "X-Metadata"],
+        expose_headers=[
+            "X-Application-Id",
+            "X-Duplicate-Warning",
+            "X-Metadata",
+            "X-Correlation-ID",
+            "X-Environment",
+        ],
     )
 
     # ── Exception handlers ────────────────────────────────

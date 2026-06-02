@@ -4,11 +4,31 @@ from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
 
+VALID_ENVS = {"development", "e2e", "staging", "production", "test"}
+
+
 class Settings(BaseSettings):
     # ── Application ──────────────────────────────────────
+    # APP_ENV must be one of VALID_ENVS. The value is stamped onto
+    # every response as the X-Environment header and surfaced on
+    # /health so the dashboard and extension can show which stack
+    # they're talking to. Set explicitly per docker-compose file:
+    #   dev   → development
+    #   e2e   → e2e
+    #   prod  → production
     APP_ENV: str = "development"
     APP_PORT: int = 8000
     LOG_LEVEL: str = "INFO"
+
+    @field_validator("APP_ENV")
+    @classmethod
+    def validate_env(cls, v: str) -> str:
+        if v not in VALID_ENVS:
+            raise ValueError(
+                f"APP_ENV={v!r} is not one of {sorted(VALID_ENVS)}. "
+                "Set it explicitly in the env file for this stack."
+            )
+        return v
 
     # ── Database ─────────────────────────────────────────
     POSTGRES_USER: str = "rit_user"

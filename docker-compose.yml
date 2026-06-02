@@ -1,3 +1,22 @@
+# ─────────────────────────────────────────────────────────────
+# Development stack.
+#   Postgres → 5432   (volume persists across runs)
+#   Backend  → 8000   APP_ENV=development
+#   Frontend → 80
+#   n8n      → 5678   (optional, opt-in via --profile email)
+#
+# Loads .env.dev (gitignored). Copy .env.example to .env.dev once.
+# Run:
+#   docker compose --env-file .env.dev up -d              # default
+#   docker compose --env-file .env.dev --profile email up # with n8n
+#
+# Project name is intentionally left as `resume-intelligence-tracker`
+# (the original) so the existing `rit_postgres_data` volume — which
+# holds your real applications + base résumé — is reused, not
+# orphaned. The e2e and prod stacks use distinct project names
+# (`rit-e2e`, `rit-prod`) for isolation.
+# ─────────────────────────────────────────────────────────────
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -12,11 +31,12 @@ services:
     volumes:
       - rit_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
   backend:
     build: .
     container_name: rit_backend
@@ -27,12 +47,14 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env
+      - .env.dev
     environment:
-      # Explicitly set the python environment to production inside container
-      APP_ENV: production
-      # Force use of PostgreSQL container for the db connection
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB}
+      # Stack identity — stamped on every API response as X-Environment.
+      APP_ENV: development
+      # Force in-network DB hostname regardless of what's in .env.dev
+      # (which uses `localhost` so host-side alembic/pytest work).
+      # Internal postgres service port is always 5432 inside the container network.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
 
   frontend:
     build: ./dashboard
@@ -46,7 +68,7 @@ services:
   n8n:
     # Optional — email-monitoring path is deprecated in favour of the
     # in-app résumé generator. Bring it up explicitly with:
-    #   docker-compose --profile email up
+    #   docker compose --env-file .env.dev --profile email up
     profiles: ["email"]
     image: n8nio/n8n:latest
     container_name: rit_n8n
@@ -72,6 +94,8 @@ services:
       - rit_n8n_data:/home/node/.n8n
 
 volumes:
+  # Preserved name — your existing dev data (24 applications + base
+  # résumé) sits in this volume and stays put across this change.
   rit_postgres_data:
     driver: local
   rit_n8n_data:

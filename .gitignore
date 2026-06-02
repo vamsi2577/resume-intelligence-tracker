@@ -1,6 +1,14 @@
-# Environment
+# Environment — never commit secrets.
+# Real env files are per-stack and gitignored.
+# Templates (*.example) are committed so devs can copy them.
 .env
+.env.dev
+.env.e2e
+.env.staging
+.env.prod
 *.env
+!*.example
+!*.example.*
 
 # Python
 __pycache__/

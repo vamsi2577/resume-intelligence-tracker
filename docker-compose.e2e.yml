@@ -1,4 +1,16 @@
-name: resume-intelligence-tracker-e2e
+# ─────────────────────────────────────────────────────────────
+# Ephemeral end-to-end test stack.
+# Fully isolated from dev: own ports, own DB, own volumes (none).
+# Data is destroyed every time the stack stops.
+#
+#   Postgres  → 5433   (no persistent volume)
+#   Backend   → 8080   APP_ENV=e2e
+#   Frontend  → 8081
+#
+# Run:
+#   docker compose -f docker-compose.e2e.yml --env-file .env.e2e up -d
+# ─────────────────────────────────────────────────────────────
+name: rit-e2e
 
 services:
   postgres-e2e:
@@ -6,15 +18,15 @@ services:
     container_name: rit_postgres_e2e
     restart: unless-stopped
     environment:
-      POSTGRES_USER: rit_test_user
-      POSTGRES_PASSWORD: rit_test_password
-      POSTGRES_DB: resume_intelligence_test
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      # Expose on 5433 to not conflict with local dev 5432
+      # 5433 so it never conflicts with the dev stack on 5432.
       - "5433:5432"
-    # No persistent volume mapping. The data is destroyed when container stops.
+    # Intentionally no volume mapping — data destroyed on `down`.
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U rit_test_user -d resume_intelligence_test" ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -28,13 +40,13 @@ services:
       postgres-e2e:
         condition: service_healthy
     ports:
-      # Expose on 8080 to not conflict with local dev 8000
       - "8080:8000"
+    env_file:
+      - .env.e2e
     environment:
-      APP_ENV: production
-      DATABASE_URL: postgresql+asyncpg://rit_test_user:rit_test_password@postgres-e2e:5432/resume_intelligence_test
-      # We could run the migrations and seeds cleanly here
-      # using a custom entrypoint or compose command if desired
+      APP_ENV: e2e
+      # Internal postgres-e2e service port is always 5432 inside the container network.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-e2e:5432/${POSTGRES_DB}
 
   seeder:
     build: .
@@ -42,8 +54,12 @@ services:
     depends_on:
       backend:
         condition: service_started
+    env_file:
+      - .env.e2e
     environment:
-      DATABASE_URL: postgresql+asyncpg://rit_test_user:rit_test_password@postgres-e2e:5432/resume_intelligence_test
+      APP_ENV: e2e
+      # Internal postgres-e2e service port is always 5432 inside the container network.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-e2e:5432/${POSTGRES_DB}
     command: >-
       sh -c "python -m alembic upgrade head && python -m src.db.seed"
     restart: "no"
@@ -55,5 +71,4 @@ services:
     depends_on:
       - backend
     ports:
-      # Expose Nginx on 8081
       - "8081:80"

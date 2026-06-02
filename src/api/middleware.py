@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from src.core.config import settings
 from src.utils.correlation import set_correlation_id
 from src.utils.exceptions import DuplicateError, NotFoundError, ValidationError
 from src.utils.logger import get_logger
@@ -18,6 +19,7 @@ from src.utils import metrics
 logger = get_logger(__name__)
 
 CORRELATION_HEADER = "X-Correlation-ID"
+ENVIRONMENT_HEADER = "X-Environment"
 
 
 class CorrelationIDMiddleware(BaseHTTPMiddleware):
@@ -45,6 +47,10 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
             metrics.record_parse_failure(request.url.path)
 
         response.headers[CORRELATION_HEADER] = cid
+        # Stamp the environment on every response so clients (dashboard
+        # + extension) can show a badge and detect cross-env mistakes
+        # (e.g. dashboard pointing at prod while you think it's dev).
+        response.headers[ENVIRONMENT_HEADER] = settings.APP_ENV
         return response
 
 

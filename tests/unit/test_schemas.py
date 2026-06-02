@@ -82,9 +82,9 @@ class TestApplicationCreateRequest:
         req = ApplicationCreateRequest(**_valid_create(applied_date=str(_today())))
         assert req.applied_date == _today()
 
-    def test_follow_up_date_in_future_raises(self):
-        with pytest.raises(ValidationError, match="future"):
-            ApplicationCreateRequest(**_valid_create(follow_up_date=str(_future())))
+    def test_follow_up_date_in_future_passes(self):
+        req = ApplicationCreateRequest(**_valid_create(follow_up_date=str(_future())))
+        assert req.follow_up_date == _future()
 
     def test_follow_up_date_in_past_passes(self):
         req = ApplicationCreateRequest(**_valid_create(follow_up_date=str(_past())))

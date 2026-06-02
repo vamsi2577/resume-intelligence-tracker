@@ -1,5 +1,24 @@
 export const API_BASE = '/api/v1';
 
+// Fetch the backend's /health to read its self-reported environment.
+// Cached on first call so the env badge doesn't ping the API repeatedly.
+let _healthCache = null;
+export async function fetchHealth() {
+  if (_healthCache) return _healthCache;
+  try {
+    const resp = await fetch('/health');
+    if (!resp.ok) return null;
+    const body = await resp.json();
+    _healthCache = {
+      env: body.env || resp.headers.get('X-Environment') || 'unknown',
+      db: body.db,
+    };
+    return _healthCache;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchApplications(params) {
   const cleanParams = Object.fromEntries(
     Object.entries(params).filter(([_, v]) => v != null && v !== '')

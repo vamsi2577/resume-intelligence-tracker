@@ -1,9 +1,51 @@
+import { useEffect, useState } from 'react';
+import { fetchHealth } from '../services/api';
+
+const ENV_COLORS = {
+  development: { bg: '#dbeafe', fg: '#1d4ed8', label: 'DEV' },
+  e2e:         { bg: '#fef3c7', fg: '#a16207', label: 'E2E' },
+  staging:     { bg: '#fde68a', fg: '#92400e', label: 'STAGING' },
+  production:  { bg: '#fee2e2', fg: '#b91c1c', label: 'PROD' },
+  test:        { bg: '#e5e7eb', fg: '#374151', label: 'TEST' },
+  unknown:     { bg: '#e5e7eb', fg: '#374151', label: '?' },
+};
+
+function EnvBadge({ env }) {
+  const style = ENV_COLORS[env] || ENV_COLORS.unknown;
+  return (
+    <div
+      className="env-badge"
+      title={`Backend reports APP_ENV=${env}. Don't act on prod data unless you mean to.`}
+      style={{
+        background: style.bg,
+        color: style.fg,
+        fontSize: 10,
+        fontWeight: 700,
+        padding: '2px 8px',
+        borderRadius: 999,
+        letterSpacing: 0.5,
+      }}
+    >
+      {style.label}
+    </div>
+  );
+}
+
 export function Header({ stats, activeCount, activeTab, onTabChange }) {
   const { total = '-', interview = '-', rejected = '-', offer = '-' } = stats || {};
+  const [env, setEnv] = useState('unknown');
+
+  useEffect(() => {
+    fetchHealth().then((h) => h && setEnv(h.env));
+  }, []);
+
   return (
     <header>
       <div className="header-left">
-        <div className="header-tag">Resume Intelligence · Phase 2</div>
+        <div className="header-tag" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>Resume Intelligence · Phase 2</span>
+          <EnvBadge env={env} />
+        </div>
         <h1>Application <span>Tracker</span></h1>
       </div>
 

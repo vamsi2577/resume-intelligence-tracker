@@ -32,7 +32,9 @@ def _mock_response(**overrides) -> dict:
         "applied_date": str(_today()),
         "job_url": None,
         "job_id": None,
+        "job_description": None,
         "resume_version": None,
+        "resume_content": None,
         "notes": None,
         "salary_range": None,
         "location": None,
@@ -41,6 +43,7 @@ def _mock_response(**overrides) -> dict:
         "contact_name": None,
         "contact_email": None,
         "follow_up_date": None,
+        "needs_review": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "duplicate_warning": overrides.get("duplicate_warning", False),
@@ -217,18 +220,36 @@ class TestGetStats:
     @pytest.mark.asyncio
     async def test_returns_200_with_all_fields(self, client):
         from src.schemas.application import StatsResponse
-        mock = StatsResponse(total=10, interview=2, rejected=3, offer=1, needs_review=4)
+        mock = StatsResponse(
+            total=10,
+            interview=2,
+            rejected=3,
+            offer=1,
+            needs_review=4,
+            ats_pass_rate=0.3,
+            source_breakdown={"manual": 5, "resume_generator": 5},
+            weekly_trend=[]
+        )
         with patch("src.api.applications.application_service.get_stats",
                    new_callable=AsyncMock, return_value=mock):
             resp = await client.get("/api/v1/applications/stats")
         assert resp.status_code == 200
         body = resp.json()
-        assert set(body.keys()) == {"total", "interview", "rejected", "offer", "needs_review"}
+        assert set(body.keys()) == {"total", "interview", "rejected", "offer", "needs_review", "ats_pass_rate", "source_breakdown", "weekly_trend"}
 
     @pytest.mark.asyncio
     async def test_returns_zeros_when_no_data(self, client):
         from src.schemas.application import StatsResponse
-        mock = StatsResponse(total=0, interview=0, rejected=0, offer=0, needs_review=0)
+        mock = StatsResponse(
+            total=0,
+            interview=0,
+            rejected=0,
+            offer=0,
+            needs_review=0,
+            ats_pass_rate=0.0,
+            source_breakdown={"manual": 0, "resume_generator": 0},
+            weekly_trend=[]
+        )
         with patch("src.api.applications.application_service.get_stats",
                    new_callable=AsyncMock, return_value=mock):
             resp = await client.get("/api/v1/applications/stats")
