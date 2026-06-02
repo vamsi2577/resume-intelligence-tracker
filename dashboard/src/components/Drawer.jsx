@@ -19,6 +19,8 @@ export function Drawer({ app, history, loading, isOpen, onClose, onUpdate, onDel
         follow_up_date: app.follow_up_date || '',
         work_type: app.work_type || '',
         salary_range: app.salary_range || '',
+        location: app.location || '',
+        job_url: app.job_url || '',
         needs_review: app.needs_review || false,
       });
       setEditError(null);
@@ -85,6 +87,36 @@ export function Drawer({ app, history, loading, isOpen, onClose, onUpdate, onDel
                 </div>
               </div>
 
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Location</label>
+                  <input className="form-input" value={form.location || ''} onChange={set('location')} placeholder="City, State or Remote" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">
+                    Job Link{' '}
+                    {form.job_url && (
+                      <a
+                        href={form.job_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 11, marginLeft: 4, textDecoration: 'none' }}
+                        title="Open job post in new tab"
+                      >
+                        ↗
+                      </a>
+                    )}
+                  </label>
+                  <input
+                    className="form-input"
+                    type="url"
+                    value={form.job_url || ''}
+                    onChange={set('job_url')}
+                    placeholder="https://…"
+                  />
+                </div>
+              </div>
+
               <div className="drawer-section-title" style={{ marginTop: '4px' }}>Recruiter</div>
               <div className="form-row">
                 <div className="form-group">
@@ -125,18 +157,6 @@ export function Drawer({ app, history, loading, isOpen, onClose, onUpdate, onDel
                 <div className="meta-item">
                   <div className="meta-label">Source</div>
                   <div className="meta-value">{app.source || '–'}</div>
-                </div>
-                <div className="meta-item">
-                  <div className="meta-label">Location</div>
-                  <div className="meta-value">{app.location || '–'}</div>
-                </div>
-                <div className="meta-item">
-                  <div className="meta-label">Job Link</div>
-                  <div className="meta-value">
-                    {app.job_url
-                      ? <a href={app.job_url} target="_blank" rel="noopener noreferrer">↗ Open</a>
-                      : '–'}
-                  </div>
                 </div>
               </div>
 
