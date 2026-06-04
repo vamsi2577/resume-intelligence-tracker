@@ -126,15 +126,14 @@ async def test_persist_attaches_raw_output_on_failure_only():
 
 @pytest.mark.asyncio
 async def test_get_stats_math():
-    rows = [
-        SimpleNamespace(status="success", duration_ms=100, total_tokens=200),
-        SimpleNamespace(status="success", duration_ms=300, total_tokens=400),
-        SimpleNamespace(status="llm_error", duration_ms=None, total_tokens=None),
-        SimpleNamespace(status="validation_error", duration_ms=50, total_tokens=10),
-    ]
+    # get_stats now aggregates in SQL and reads one result row.
+    agg = SimpleNamespace(
+        total=4, success=2, llm_error=1, validation_error=1,
+        avg_duration=150.0, total_tokens=610,
+    )
     db = AsyncMock()
     result = MagicMock()
-    result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=rows)))
+    result.one = MagicMock(return_value=agg)
     db.execute = AsyncMock(return_value=result)
 
     stats = await audit.get_stats(db)
@@ -144,15 +143,19 @@ async def test_get_stats_math():
     assert stats.llm_error == 1
     assert stats.validation_error == 1
     assert stats.success_rate == 0.5
-    assert stats.avg_duration_ms == 150   # (100+300+50)/3
+    assert stats.avg_duration_ms == 150
     assert stats.total_tokens == 610
 
 
 @pytest.mark.asyncio
 async def test_get_stats_empty():
+    agg = SimpleNamespace(
+        total=0, success=0, llm_error=0, validation_error=0,
+        avg_duration=None, total_tokens=0,
+    )
     db = AsyncMock()
     result = MagicMock()
-    result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    result.one = MagicMock(return_value=agg)
     db.execute = AsyncMock(return_value=result)
 
     stats = await audit.get_stats(db)
