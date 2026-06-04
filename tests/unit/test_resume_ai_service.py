@@ -20,6 +20,18 @@ from src.utils.exceptions import ValidationError
 OWNER = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+@pytest.fixture(autouse=True)
+def _no_audit_db():
+    """tailor() is wrapped by @track_llm_call, which writes an audit row
+    from its own DB session. Stub that out for these pure-unit tests so we
+    don't reach for a real database."""
+    with patch(
+        "src.services.generation_audit_service._persist",
+        new=AsyncMock(return_value=None),
+    ):
+        yield
+
+
 def _mock_base_row(raw_text: str = "Vamsi P. — Software Engineer\nPython, FastAPI, AWS"):
     row = MagicMock()
     row.raw_text = raw_text
@@ -130,6 +142,60 @@ async def test_tailor_invalid_llm_output_raises_validation_error():
     ):
         with pytest.raises(ValidationError):
             await resume_ai_service.tailor(db, OWNER, payload)
+
+
+@pytest.mark.asyncio
+async def test_tailor_extracts_job_metadata():
+    """job_metadata from the LLM flows through onto the ResumeRequest."""
+    db = AsyncMock()
+    payload = JDResumeRequest(
+        job_description="A long job description text describing the role.",
+    )
+    out = _well_formed_llm_output()
+    out["job_metadata"] = {
+        "location": "Austin, TX",
+        "work_type": "Hybrid",          # mixed case → normalised to "hybrid"
+        "salary_range": "$140k–$170k",
+        "notes": "Requires US work authorization.",
+    }
+
+    with patch(
+        "src.services.resume_ai_service.base_resume_service.get_required",
+        new=AsyncMock(return_value=_mock_base_row()),
+    ), patch(
+        "src.services.resume_ai_service.llm_client.complete",
+        new=AsyncMock(return_value=out),
+    ):
+        result = await resume_ai_service.tailor(db, OWNER, payload)
+
+    assert result.job_metadata is not None
+    assert result.job_metadata.location == "Austin, TX"
+    assert result.job_metadata.work_type == "hybrid"
+    assert result.job_metadata.salary_range == "$140k–$170k"
+    assert "authorization" in result.job_metadata.notes
+
+
+@pytest.mark.asyncio
+async def test_tailor_drops_invalid_work_type():
+    """An out-of-vocabulary work_type is coerced to None, not a 422."""
+    db = AsyncMock()
+    payload = JDResumeRequest(
+        job_description="A long job description text describing the role.",
+    )
+    out = _well_formed_llm_output()
+    out["job_metadata"] = {"work_type": "flexible", "location": ""}
+
+    with patch(
+        "src.services.resume_ai_service.base_resume_service.get_required",
+        new=AsyncMock(return_value=_mock_base_row()),
+    ), patch(
+        "src.services.resume_ai_service.llm_client.complete",
+        new=AsyncMock(return_value=out),
+    ):
+        result = await resume_ai_service.tailor(db, OWNER, payload)
+
+    assert result.job_metadata.work_type is None
+    assert result.job_metadata.location is None  # "" → None
 
 
 @pytest.mark.asyncio
