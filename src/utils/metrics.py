@@ -15,8 +15,8 @@ from __future__ import annotations
 import functools
 import time
 import threading
-from collections import defaultdict
-from typing import Any, Callable
+from collections import defaultdict, deque
+from typing import Any, Callable, Deque
 
 from src.utils.logger import get_logger
 
@@ -24,12 +24,19 @@ logger = get_logger(__name__)
 
 _lock = threading.Lock()
 
+# Rolling-window size for latency samples. Bounded so a long-running
+# process can't grow these lists without limit (one append per request /
+# DB call would otherwise leak memory until restart). Aggregate counters
+# (_status_counts, _parse_failures) stay exact; only the latency *sample*
+# window is capped — p95/avg are computed over the most recent N.
+_MAX_SAMPLES = 1000
+
 # ── Internal state ────────────────────────────────────────
 
-_request_latencies: dict[str, list[float]] = defaultdict(list)   # key: "METHOD /path"
+_request_latencies: dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=_MAX_SAMPLES))  # key: "METHOD /path"
 _status_counts: dict[str, int] = defaultdict(int)                 # key: "2xx" / "4xx" / "5xx"
 _parse_failures: dict[str, int] = defaultdict(int)                # key: endpoint
-_db_latencies: dict[str, list[float]] = defaultdict(list)         # key: operation name
+_db_latencies: dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=_MAX_SAMPLES))        # key: operation name
 
 
 # ── Public recorders ──────────────────────────────────────
@@ -109,7 +116,7 @@ def reset() -> None:
 
 # ── Helpers ───────────────────────────────────────────────
 
-def _latency_stats(values: list[float]) -> dict[str, float]:
+def _latency_stats(values: "Deque[float] | list[float]") -> dict[str, float]:
     if not values:
         return {"count": 0, "min": 0.0, "max": 0.0, "avg": 0.0, "p95": 0.0}
     sorted_vals = sorted(values)
