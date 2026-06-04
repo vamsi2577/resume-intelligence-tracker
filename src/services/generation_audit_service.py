@@ -22,7 +22,7 @@ import time
 import uuid
 from typing import Awaitable, Callable
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from src.db.session import AsyncSessionFactory
 from src.models.resume_generation import ResumeGeneration
@@ -166,23 +166,29 @@ async def list_recent(db, *, limit: int = 50) -> list[ResumeGeneration]:
 
 
 async def get_stats(db) -> GenerationStatsResponse:
-    rows = (await db.execute(select(ResumeGeneration))).scalars().all()
-    total = len(rows)
+    # Aggregate in SQL — a single scan returning a handful of numbers —
+    # rather than pulling every row into memory (the table grows one row
+    # per generation). Mirrors application_service.get_stats.
+    stmt = select(
+        func.count().label("total"),
+        func.count().filter(ResumeGeneration.status == "success").label("success"),
+        func.count().filter(ResumeGeneration.status == "llm_error").label("llm_error"),
+        func.count().filter(ResumeGeneration.status == "validation_error").label("validation_error"),
+        func.avg(ResumeGeneration.duration_ms).label("avg_duration"),
+        func.coalesce(func.sum(ResumeGeneration.total_tokens), 0).label("total_tokens"),
+    )
+    row = (await db.execute(stmt)).one()
+
+    total = row.total or 0
     if total == 0:
         return GenerationStatsResponse()
 
-    success = sum(1 for r in rows if r.status == "success")
-    llm_error = sum(1 for r in rows if r.status == "llm_error")
-    validation_error = sum(1 for r in rows if r.status == "validation_error")
-    durations = [r.duration_ms for r in rows if r.duration_ms is not None]
-    total_tokens = sum(r.total_tokens or 0 for r in rows)
-
     return GenerationStatsResponse(
         total=total,
-        success=success,
-        llm_error=llm_error,
-        validation_error=validation_error,
-        success_rate=round(success / total, 3),
-        avg_duration_ms=int(sum(durations) / len(durations)) if durations else None,
-        total_tokens=total_tokens,
+        success=row.success or 0,
+        llm_error=row.llm_error or 0,
+        validation_error=row.validation_error or 0,
+        success_rate=round((row.success or 0) / total, 3),
+        avg_duration_ms=int(row.avg_duration) if row.avg_duration is not None else None,
+        total_tokens=int(row.total_tokens or 0),
     )

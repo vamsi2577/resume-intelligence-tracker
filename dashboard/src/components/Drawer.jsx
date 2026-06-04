@@ -176,15 +176,7 @@ export function Drawer({ app, history, loading, isOpen, onClose, onUpdate, onDel
                 </>
               )}
 
-              {/* ── Phase 3 Placeholder ── */}
-              <div className="drawer-section-title" style={{ marginTop: '16px' }}>Analysis</div>
-              <div className="phase3-placeholder">
-                <div className="phase3-icon">⟡</div>
-                <div className="phase3-label">Resume Analysis</div>
-                <div className="phase3-desc">Available in Phase 3</div>
-              </div>
-
-              <div className="edit-actions" style={{ gap: 8, display: 'flex', flexWrap: 'wrap' }}>
+              <div className="edit-actions" style={{ gap: 8, display: 'flex', flexWrap: 'wrap', marginTop: '16px' }}>
                 <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
                   {saving ? 'Saving…' : 'Save Changes'}
                 </button>
