@@ -20,6 +20,18 @@ from src.utils.exceptions import ValidationError
 OWNER = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+@pytest.fixture(autouse=True)
+def _no_audit_db():
+    """tailor() is wrapped by @track_llm_call, which writes an audit row
+    from its own DB session. Stub that out for these pure-unit tests so we
+    don't reach for a real database."""
+    with patch(
+        "src.services.generation_audit_service._persist",
+        new=AsyncMock(return_value=None),
+    ):
+        yield
+
+
 def _mock_base_row(raw_text: str = "Vamsi P. — Software Engineer\nPython, FastAPI, AWS"):
     row = MagicMock()
     row.raw_text = raw_text

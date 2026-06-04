@@ -67,12 +67,14 @@ def create_app() -> FastAPI:
     from src.api.metrics import router as metrics_router
     from src.api.resume_generator import router as resume_generator_router
     from src.api.base_resume import router as base_resume_router
+    from src.api.generation_history import router as generation_history_router
 
     app.include_router(health_router)
     app.include_router(applications_router)
     app.include_router(metrics_router)
     app.include_router(resume_generator_router)
     app.include_router(base_resume_router)
+    app.include_router(generation_history_router)
 
     # Email watcher (n8n integration) is optional. Disabled by default
     # in the unified product; flip ENABLE_EMAIL_WATCHER=true to expose
@@ -96,14 +98,25 @@ def create_app() -> FastAPI:
     # ── Global fallback exception handler ─────────────────
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
+        from src.utils.correlation import get_correlation_id
+
+        cid = get_correlation_id()
         logger.error(
             "Unhandled exception",
             extra={"path": request.url.path, "error": str(exc)},
             exc_info=True,
         )
+        # Surface the correlation id in the body and header so a user can
+        # quote it when reporting the failure; it joins to the structured
+        # logs and (for résumé gen) the resume_generations audit row.
         return JSONResponse(
             status_code=500,
-            content={"detail": "Internal server error", "path": request.url.path},
+            content={
+                "detail": "Internal server error",
+                "path": request.url.path,
+                "correlation_id": cid,
+            },
+            headers={"X-Correlation-ID": cid} if cid else None,
         )
 
     return app

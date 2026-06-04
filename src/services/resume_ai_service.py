@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.resume_generator import JDResumeRequest, ResumeRequest
 from src.services import base_resume_service, llm_client
+from src.services.generation_audit_service import track_llm_call
 from src.utils.exceptions import ValidationError
 from src.utils.logger import get_logger
 
@@ -58,12 +59,16 @@ def _render_prompt(
     )
 
 
+@track_llm_call
 async def tailor(
     db: AsyncSession,
     owner_id: uuid.UUID,
     payload: JDResumeRequest,
 ) -> ResumeRequest:
     """Run the LLM and return a validated ResumeRequest.
+
+    Every attempt (success or failure) is recorded to resume_generations
+    by the @track_llm_call decorator.
 
     Raises:
         NotFoundError if the owner has not uploaded a base résumé.
