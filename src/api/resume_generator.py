@@ -21,8 +21,14 @@ from src.schemas.resume_generator import (
     JDResumeRequest,
     ResumeRequest,
 )
-from src.services import resume_ai_service, resume_generator_service
+from src.services import (
+    generation_audit_service,
+    resume_ai_service,
+    resume_generator_service,
+)
 from src.services.llm_client import LLMError
+from src.utils.correlation import get_correlation_id
+from src.utils.llm_context import get_last_generation_id, set_preview_mode
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -94,17 +100,31 @@ async def generate_resume_from_jd(
     - `preview=true`: return the tailored ResumeRequest JSON so the
       client can review/edit before committing. No DB write in preview mode.
     """
+    # Recorded on the audit row so preview attempts are distinguishable
+    # from committed generations.
+    set_preview_mode(preview)
+
     try:
         tailored = await resume_ai_service.tailor(db, owner_id, request)
     except LLMError as e:
-        # Upstream model failed — surface as 502, not opaque 500.
-        raise HTTPException(status_code=502, detail=f"LLM upstream failure: {e}") from e
+        # Upstream model failed — surface as 502, not opaque 500. Include
+        # the correlation id so the failure can be traced to its audit row.
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM upstream failure: {e}",
+            headers={"X-Correlation-ID": get_correlation_id()},
+        ) from e
 
     if preview:
         return JDResumePreviewResponse(tailored=tailored)
 
     docx_stream, filename, metadata = await resume_generator_service.generate_and_log(
         db, tailored
+    )
+    # Link the audit row written during tailoring to the application it
+    # produced (best-effort; never blocks the response).
+    await generation_audit_service.attach_application(
+        get_last_generation_id(), uuid.UUID(metadata.application_id)
     )
     logger.info(
         "Resume generated from JD",

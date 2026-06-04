@@ -6,6 +6,7 @@ import { Drawer } from './components/Drawer';
 import { Pagination } from './components/Pagination';
 import { AppModal } from './components/AppModal';
 import { ResumeTab } from './components/ResumeTab';
+import { GenerationHistory } from './components/GenerationHistory';
 import {
   fetchApplications, fetchHistory, fetchStats,
   createApplication, updateApplication, deleteApplication,
@@ -192,9 +193,13 @@ function App() {
             onCreate={handleCreate}
           />
         </div>
-      ) : (
+      ) : activeTab === 'resume' ? (
         <div className="resume-shell">
           <ResumeTab onApplicationLogged={handleApplicationLogged} />
+        </div>
+      ) : (
+        <div className="history-shell">
+          <GenerationHistory />
         </div>
       )}
     </div>

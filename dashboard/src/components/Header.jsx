@@ -62,6 +62,12 @@ export function Header({ stats, activeCount, activeTab, onTabChange }) {
         >
           ⟡ Resume Generator
         </button>
+        <button
+          className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
+          onClick={() => onTabChange('history')}
+        >
+          ◷ Generation History
+        </button>
       </div>
 
       <div className="header-right">

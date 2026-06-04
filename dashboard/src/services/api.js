@@ -180,3 +180,10 @@ export async function saveBaseResume(data) {
   if (!resp.ok) throw new Error(json.detail || `HTTP ${resp.status}`);
   return json;
 }
+
+// ── Résumé-generation audit log (observability) ────────────
+export async function fetchGenerationHistory(limit = 50) {
+  const resp = await fetch(`${API_BASE}/generation-history?limit=${limit}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();   // { data: [...], stats: {...} }
+}

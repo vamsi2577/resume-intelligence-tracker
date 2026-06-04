@@ -21,11 +21,13 @@ from __future__ import annotations
 
 import json as _json
 import re
+import time
 from typing import Any
 
 import httpx
 
 from src.core.config import settings
+from src.utils.llm_context import LLMCallMeta, set_llm_meta
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -100,6 +102,7 @@ async def complete(
 
     url = settings.LLM_BASE_URL.rstrip("/") + "/chat/completions"
 
+    start = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT_SEC) as client:
             resp = await client.post(url, json=body, headers=headers)
@@ -115,11 +118,30 @@ async def complete(
         logger.error("LLM network error", extra={"url": url, "error": str(e)})
         raise LLMError(f"LLM network error: {e}") from e
 
+    duration_ms = int((time.perf_counter() - start) * 1000)
+
     try:
         content: str = payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
         logger.error("LLM response malformed", extra={"payload": payload})
         raise LLMError("LLM response missing choices[0].message.content") from e
+
+    # Record call metadata for the audit layer (token usage, latency, raw
+    # output). Stored in a ContextVar so callers don't have to thread it
+    # through their return types. Set before JSON parsing so a parse
+    # failure still has the raw content to log.
+    usage = payload.get("usage") or {}
+    set_llm_meta(
+        LLMCallMeta(
+            model=payload.get("model") or settings.LLM_MODEL,
+            provider=settings.LLM_PROVIDER,
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            raw_content=content,
+            duration_ms=duration_ms,
+        )
+    )
 
     if not json:
         return content
