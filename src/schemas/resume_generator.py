@@ -117,7 +117,9 @@ class JDResumeRequest(BaseModel):
     The backend tailors the stored base résumé to this JD using the LLM
     provider configured in src/core/config.py.
     """
-    job_description: str = Field(..., min_length=20)
+    # Upper bound guards against multi-MB pastes inflating LLM token cost
+    # and DB storage. ~20k chars comfortably fits the longest real JDs.
+    job_description: str = Field(..., min_length=20, max_length=20_000)
     target_company: Optional[str] = Field(None, max_length=255)
     job_title: Optional[str] = Field(None, max_length=255)
 

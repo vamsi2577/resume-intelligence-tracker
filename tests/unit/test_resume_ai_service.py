@@ -198,6 +198,19 @@ async def test_tailor_drops_invalid_work_type():
     assert result.job_metadata.location is None  # "" → None
 
 
+def test_jd_request_rejects_oversized_description():
+    """A multi-MB JD paste is rejected at the schema boundary (token /
+    storage guard) rather than being forwarded to the LLM."""
+    from pydantic import ValidationError as PydErr
+
+    with pytest.raises(PydErr):
+        JDResumeRequest(job_description="x" * 20_001)
+
+    # Just under the cap is fine.
+    ok = JDResumeRequest(job_description="x" * 20_000)
+    assert len(ok.job_description) == 20_000
+
+
 @pytest.mark.asyncio
 async def test_tailor_propagates_missing_base_resume():
     """No base résumé on file → NotFoundError bubbles up unchanged."""

@@ -51,6 +51,19 @@ class TestRecordRequest:
         stats = metrics.get_snapshot()["requests"]["latency_ms"]["GET /health"]
         assert stats["p95"] >= stats["avg"]
 
+    def test_latency_window_is_bounded(self):
+        """Latency samples must not grow without limit — they're capped at
+        _MAX_SAMPLES so a long-running process can't leak memory."""
+        n = metrics._MAX_SAMPLES + 500
+        for i in range(n):
+            metrics.record_request("/health", "GET", 200, float(i))
+        stats = metrics.get_snapshot()["requests"]["latency_ms"]["GET /health"]
+        # Sample count is capped …
+        assert stats["count"] == metrics._MAX_SAMPLES
+        # … and the window holds the most-recent values (oldest evicted).
+        assert stats["max"] == float(n - 1)
+        assert stats["min"] == float(n - metrics._MAX_SAMPLES)
+
 
 # ── status counters ───────────────────────────────────────
 
