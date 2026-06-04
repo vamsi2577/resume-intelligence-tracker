@@ -48,6 +48,22 @@ fences, and no preamble.
 - job_title: exact role title from the JD.
 - job_description: paste the full JD text back verbatim (no summarisation).
 
+## job_metadata (extract from the JD only — never invent)
+
+Populate a `job_metadata` object with what the JD explicitly states. Use
+`null` for any field the JD does not state — do not guess or infer.
+
+- location: the work location as written (e.g. "Austin, TX", "Remote (US)",
+  "London, UK"). Null if the JD gives no location.
+- work_type: EXACTLY one of "remote", "hybrid", "onsite", or null. Map
+  phrasing like "fully remote" → "remote", "in-office"/"on-site" → "onsite",
+  "X days in office" → "hybrid". Null if unstated.
+- salary_range: the pay range as written (e.g. "$120k–$150k", "£60,000").
+  Null if the JD lists no compensation.
+- notes: at most one short sentence flagging anything noteworthy for the
+  applicant (e.g. visa sponsorship, security clearance, travel %, contract
+  vs FTE). Null if nothing stands out. Keep under 200 characters.
+
 ## Output schema
 
 Return a single JSON object matching this shape:
@@ -79,7 +95,13 @@ Return a single JSON object matching this shape:
   ],
   "education": [
     {"degree": "string", "university": "string", "details": "string"}
-  ]
+  ],
+  "job_metadata": {
+    "location": "string or null",
+    "work_type": "remote | hybrid | onsite | null",
+    "salary_range": "string or null",
+    "notes": "string or null"
+  }
 }
 
 If the caller supplied a hint for `target_company` or `job_title`, prefer

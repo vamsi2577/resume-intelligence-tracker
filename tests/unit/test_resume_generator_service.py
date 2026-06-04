@@ -225,6 +225,45 @@ class TestGenerateAndLog:
         added_app = db.add.call_args_list[0][0][0]
         assert added_app.applied_date == date.today()
 
+    @pytest.mark.asyncio
+    async def test_job_metadata_autofills_row(self):
+        from src.services.resume_generator_service import generate_and_log
+        from src.schemas.resume_generator import JobMetadata
+        db = _make_db()
+        request = _minimal_request(job_metadata=JobMetadata(
+            location="Austin, TX",
+            work_type="hybrid",
+            salary_range="$140k–$170k",
+            notes="Requires US work authorization.",
+        ))
+
+        with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
+             patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
+            await generate_and_log(db, request)
+
+        added_app = db.add.call_args_list[0][0][0]
+        assert added_app.location == "Austin, TX"
+        assert added_app.work_type == "hybrid"
+        assert added_app.salary_range == "$140k–$170k"
+        assert added_app.notes == "Requires US work authorization."
+        # job_metadata must not be duplicated into the résumé JSON blob.
+        assert "job_metadata" not in added_app.resume_content
+
+    @pytest.mark.asyncio
+    async def test_no_job_metadata_leaves_fields_null(self):
+        from src.services.resume_generator_service import generate_and_log
+        db = _make_db()
+
+        with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
+             patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
+            await generate_and_log(db, _minimal_request())
+
+        added_app = db.add.call_args_list[0][0][0]
+        assert added_app.location is None
+        assert added_app.work_type is None
+        assert added_app.salary_range is None
+        assert added_app.notes is None
+
 
 # ── Schema validation ─────────────────────────────────────
 

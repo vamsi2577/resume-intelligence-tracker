@@ -74,6 +74,9 @@ async def generate_and_log(
             },
         )
 
+    # ── JD-extracted job context (auto-fill optional tracker fields) ──
+    meta = request.job_metadata
+
     # ── Log application ───────────────────────────────────
     app_id = uuid.uuid4()
     app = JobApplication(
@@ -84,7 +87,11 @@ async def generate_and_log(
         status=ApplicationStatus.applied.value,
         applied_date=today,
         job_description=request.job_description,
-        resume_content=request.model_dump(exclude={"job_description"}),
+        resume_content=request.model_dump(exclude={"job_description", "job_metadata"}),
+        location=(meta.location if meta else None),
+        work_type=(meta.work_type if meta else None),
+        salary_range=(meta.salary_range if meta else None),
+        notes=(meta.notes if meta else None),
         needs_review=False,
     )
     db.add(app)
@@ -104,6 +111,10 @@ async def generate_and_log(
             "company": request.target_company,
             "job_title": request.job_title,
             "duplicate_warning": duplicate_warning,
+            "autofilled_fields": [
+                k for k in ("location", "work_type", "salary_range", "notes")
+                if meta and getattr(meta, k)
+            ] if meta else [],
         },
     )
 
