@@ -14,10 +14,16 @@ from __future__ import annotations
 import uuid
 
 import sqlalchemy as sa
+from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from src.core.config import settings
 from src.db.base import Base
+
+
+def _default_owner_id() -> uuid.UUID:
+    return uuid.UUID(settings.DEFAULT_OWNER_ID)
 
 # Status vocabulary. Kept as a plain string column (not a PG enum) so new
 # statuses don't require a migration — validated at the schema layer.
@@ -30,8 +36,13 @@ class ResumeGeneration(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    owner_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
+    # Phase 1: NOT NULL FK to users. The audit service already passes owner_id
+    # on every write, so the default is just a safety net during transition.
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        default=_default_owner_id,
     )
 
     # Join key back to structured request logs.
@@ -71,6 +82,8 @@ class ResumeGeneration(Base):
         sa.Index("ix_resume_generations_status", "status"),
         sa.Index("ix_resume_generations_correlation_id", "correlation_id"),
         sa.Index("ix_resume_generations_application_id", "application_id"),
+        # Owner-scoped history list + stats (Phase 1).
+        sa.Index("ix_resume_generations_owner_created", "owner_id", "created_at"),
     )
 
     def __repr__(self) -> str:
