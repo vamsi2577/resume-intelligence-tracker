@@ -32,7 +32,7 @@ export function Drawer({ app, history, loading, isOpen, onClose, onUpdate, onDel
     setEditError(null);
     try {
       const payload = Object.fromEntries(
-        Object.entries(form).filter(([_, v]) => v !== '' && v !== null)
+        Object.entries(form).filter(([, v]) => v !== '' && v !== null)
       );
       await onUpdate(app.id, payload);
     } catch (err) {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchHealth } from '../services/api';
-import { Can, PERMS } from '../auth';
+import { Can, PERMS, useAuth } from '../auth';
 
 const ENV_COLORS = {
   development: { bg: '#dbeafe', fg: '#1d4ed8', label: 'DEV' },
@@ -34,6 +34,7 @@ function EnvBadge({ env }) {
 
 export function Header({ stats, activeCount, activeTab, onTabChange }) {
   const { total = '-', interview = '-', rejected = '-', offer = '-' } = stats || {};
+  const { me } = useAuth();
   const [env, setEnv] = useState('unknown');
 
   useEffect(() => {
@@ -77,9 +78,24 @@ export function Header({ stats, activeCount, activeTab, onTabChange }) {
             ⚙ Manage Users
           </button>
         </Can>
+        <button
+          className={`tab-btn ${activeTab === 'account' ? 'active' : ''}`}
+          onClick={() => onTabChange('account')}
+        >
+          ◐ My Account
+        </button>
       </div>
 
       <div className="header-right">
+        {me?.email && (
+          <button
+            className="user-chip"
+            title="My Account"
+            onClick={() => onTabChange('account')}
+          >
+            {me.email}
+          </button>
+        )}
         {activeCount > 0 && (
           <div className="nr-badge">
             <div className="nr-dot"></div>
