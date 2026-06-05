@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_owner
@@ -44,13 +44,19 @@ def _set_session_cookie(response: Response, user_id: uuid.UUID) -> None:
 @router.post("/request-link", response_model=RequestLinkResponse)
 async def request_link(
     body: RequestLinkRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> RequestLinkResponse:
     """Email a magic sign-in link. Always returns the same generic response so
-    it never reveals whether the address has an account."""
+    it never reveals whether the address has an account.
+
+    The actual send is queued as a background task so the synchronous SMTP
+    handshake never blocks the event loop (and never affects response timing,
+    which would otherwise leak account existence)."""
     raw = await auth_service.request_login(db, body.email)
     link = f"{settings.APP_BASE_URL}/login/verify?token={raw}&email={body.email}"
-    send_email(
+    background_tasks.add_task(
+        send_email,
         to=body.email,
         subject="Your Resume Intelligence sign-in link",
         body=f"Click to sign in (valid {settings.MAGIC_LINK_TTL_MIN} min):\n\n{link}\n",

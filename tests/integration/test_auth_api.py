@@ -169,6 +169,21 @@ class TestVerify:
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
+    async def test_deactivated_user_cannot_verify(self, client, authdb):
+        # Register, then deactivate the account; a fresh valid link must 401.
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        raw1 = await _raw_token_for(authdb, email)
+        assert (await client.get(f"/api/v1/auth/verify?token={raw1}&email={email}")).status_code == 200
+        async with authdb() as s:
+            await s.execute(text(
+                "UPDATE users SET is_active = false WHERE email = :e"
+            ).bindparams(e=email))
+            await s.commit()
+        raw2 = await _raw_token_for(authdb, email)
+        resp = await client.get(f"/api/v1/auth/verify?token={raw2}&email={email}")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
     async def test_existing_user_reused(self, client, authdb):
         email = f"{uuid.uuid4()}@magic-auth.io"
         raw1 = await _raw_token_for(authdb, email)

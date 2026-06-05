@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from sqlalchemy import delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
@@ -103,6 +104,11 @@ async def verify_login(db: AsyncSession, email: str, raw_token: str) -> User:
 
     row.consumed_at = _utcnow()
     user = await _get_or_create_user(db, email)
+    # A deactivated account must not be able to sign in, even with a valid
+    # link. (New auto-registered users are active, so this only blocks
+    # accounts an admin has since disabled.)
+    if not user.is_active:
+        raise UnauthorizedError("This account has been deactivated")
     await db.flush()
     return user
 
@@ -114,9 +120,19 @@ async def _get_or_create_user(db: AsyncSession, email: str) -> User:
     if existing is not None:
         return existing
 
-    user = User(id=uuid.uuid4(), email=email, is_active=True)
-    db.add(user)
-    await db.flush()
+    # Insert inside a SAVEPOINT so a concurrent signup (two links verified for
+    # the same new email at once) doesn't poison the outer transaction: the
+    # loser hits the unique-email constraint, we roll back to the savepoint and
+    # return the row the winner created.
+    try:
+        async with db.begin_nested():
+            user = User(id=uuid.uuid4(), email=email, is_active=True)
+            db.add(user)
+            await db.flush()
+    except IntegrityError:
+        return (await db.execute(
+            select(User).where(User.email == email)
+        )).scalar_one()
 
     # Grant the default signup role (user).
     role = (await db.execute(
@@ -124,6 +140,13 @@ async def _get_or_create_user(db: AsyncSession, email: str) -> User:
     )).scalar_one_or_none()
     if role is not None:
         db.add(UserRole(user_id=user.id, role_id=role.id))
+    else:
+        # Misconfiguration: roles weren't seeded. The user can sign in but has
+        # no permissions until a role is granted — make that diagnosable.
+        logger.warning(
+            "Default signup role %r not found — user created with no roles",
+            DEFAULT_SIGNUP_ROLE, extra={"email": email},
+        )
     logger.info("User auto-registered via magic link", extra={"email": email})
     return user
 
