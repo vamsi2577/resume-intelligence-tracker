@@ -14,15 +14,20 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_owner
 from src.core.config import settings
 from src.db.session import get_db
+from src.schemas.api_token import (
+    CreateTokenRequest,
+    CreateTokenResponse,
+    TokenInfo,
+)
 from src.schemas.auth import RequestLinkRequest, RequestLinkResponse, VerifyResponse
 from src.schemas.iam import MeResponse
-from src.services import auth_service, iam_service
+from src.services import auth_service, iam_service, token_service
 from src.utils.email import send_email
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -99,3 +104,47 @@ async def me(
         roles=roles,
         permissions=sorted(permissions),
     )
+
+
+# ── Personal API tokens ───────────────────────────────────
+# Bearer credentials a user mints for clients that can't carry the session
+# cookie (chiefly the H1B Scout extension). Management is scoped to the caller
+# via get_current_owner — you can only see and revoke your own tokens.
+
+@router.post(
+    "/tokens",
+    response_model=CreateTokenResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_token(
+    body: CreateTokenRequest,
+    db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
+) -> CreateTokenResponse:
+    """Mint a personal API token. The raw secret is returned exactly once —
+    it is hashed at rest and can never be retrieved again."""
+    token, raw = await token_service.create_token(
+        db, owner_id, body.name, body.expires_in_days
+    )
+    return CreateTokenResponse(token=raw, **TokenInfo.model_validate(token).model_dump())
+
+
+@router.get("/tokens", response_model=list[TokenInfo])
+async def list_tokens(
+    db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
+) -> list[TokenInfo]:
+    rows = await token_service.list_tokens(db, owner_id)
+    return [TokenInfo.model_validate(r) for r in rows]
+
+
+@router.delete("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_token(
+    token_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
+) -> Response:
+    """Revoke one of the caller's tokens. 404 if it doesn't exist or belongs to
+    someone else."""
+    await token_service.revoke_token(db, owner_id, token_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
