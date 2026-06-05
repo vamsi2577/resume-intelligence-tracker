@@ -73,12 +73,34 @@ class Settings(BaseSettings):
     # Set to "" to disable.
     ALLOWED_ORIGIN_REGEX: str = r"chrome-extension://.*"
 
-    # ── Auth seam (Phase 5 will replace this) ────────────
-    # Until real auth ships, every request is treated as owned by a fixed
-    # owner_id. `get_current_owner()` (src/api/deps.py) returns this UUID,
-    # and Phase 0+ writes it into `owner_id` columns. When auth lands,
-    # only the dependency body changes.
+    # ── Auth seam ────────────────────────────────────────
+    # Until REQUIRE_AUTH is on, every request is treated as owned by a fixed
+    # owner_id. `get_current_owner()` (src/api/deps.py) returns this UUID when
+    # auth is off; when on it resolves the session cookie to a real user.
     DEFAULT_OWNER_ID: str = "00000000-0000-0000-0000-000000000001"
+
+    # ── Authentication (Phase 2: magic-link sessions) ────
+    # Master switch. False (default) = single-tenant default owner, no login
+    # required (non-breaking). True = require a valid session; unauthenticated
+    # requests get 401. Flip on once the login UI is wired (later Phase 2 PR).
+    REQUIRE_AUTH: bool = False
+    # HS256 signing secret for session JWTs. MUST be overridden in production.
+    JWT_SECRET: SecretStr = SecretStr("dev-insecure-change-me")
+    SESSION_DAYS: int = 30
+    SESSION_COOKIE_NAME: str = "rit_session"
+    # Magic-link login token lifetime.
+    MAGIC_LINK_TTL_MIN: int = 15
+    # Where the dashboard lives — used to build the magic-link URL.
+    APP_BASE_URL: str = "http://localhost:5173"
+
+    # SMTP for sending magic links. All optional — when SMTP_HOST is blank
+    # (the default, e.g. dev), the link is logged to the console instead of
+    # emailed, so local login works with zero mail setup.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: SecretStr = SecretStr("")
+    SMTP_FROM: str = "no-reply@rit.local"
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
