@@ -11,6 +11,9 @@ alembic==1.13.3
 pydantic==2.9.2
 pydantic[email]==2.9.2
 
+# ── Auth ─────────────────────────────────────────────────
+PyJWT==2.9.0                  # session JWTs (magic-link auth, Phase 2)
+
 # ── Config ───────────────────────────────────────────────
 python-dotenv==1.0.1
 

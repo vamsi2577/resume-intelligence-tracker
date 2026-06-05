@@ -12,7 +12,12 @@ from starlette.responses import Response
 
 from src.core.config import settings
 from src.utils.correlation import set_correlation_id
-from src.utils.exceptions import DuplicateError, NotFoundError, ValidationError
+from src.utils.exceptions import (
+    DuplicateError,
+    NotFoundError,
+    UnauthorizedError,
+    ValidationError,
+)
 from src.utils.logger import get_logger
 from src.utils import metrics
 
@@ -73,5 +78,12 @@ async def duplicate_handler(request: Request, exc: DuplicateError) -> JSONRespon
 async def service_validation_handler(request: Request, exc: ValidationError) -> JSONResponse:
     return JSONResponse(
         status_code=422,
+        content={"detail": str(exc)},
+    )
+
+
+async def unauthorized_handler(request: Request, exc: UnauthorizedError) -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
         content={"detail": str(exc)},
     )

@@ -17,8 +17,14 @@ from src.api.middleware import (
     not_found_handler,
     duplicate_handler,
     service_validation_handler,
+    unauthorized_handler,
 )
-from src.utils.exceptions import DuplicateError, NotFoundError, ValidationError
+from src.utils.exceptions import (
+    DuplicateError,
+    NotFoundError,
+    UnauthorizedError,
+    ValidationError,
+)
 
 logger = get_logger(__name__)
 
@@ -35,7 +41,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Resume Intelligence Tracker",
         description="Application logger and resume intelligence pipeline.",
-        version="0.3.0",
+        version="0.4.0",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,
@@ -63,6 +69,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(NotFoundError, not_found_handler)
     app.add_exception_handler(DuplicateError, duplicate_handler)
     app.add_exception_handler(ValidationError, service_validation_handler)
+    app.add_exception_handler(UnauthorizedError, unauthorized_handler)
 
     # ── Routers ───────────────────────────────────────────
     from src.api.health import router as health_router

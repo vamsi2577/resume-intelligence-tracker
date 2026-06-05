@@ -8,13 +8,16 @@ import { AppModal } from './components/AppModal';
 import { ResumeTab } from './components/ResumeTab';
 import { GenerationHistory } from './components/GenerationHistory';
 import { AdminUsers } from './components/AdminUsers';
-import { AuthProvider } from './auth';
+import { Login } from './components/Login';
+import { Account } from './components/Account';
+import { useAuth } from './auth';
 import {
   fetchApplications, fetchHistory, fetchStats,
   createApplication, updateApplication, deleteApplication,
 } from './services/api';
 
 function App() {
+  const { loading: authLoading, needsLogin } = useAuth();
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -47,11 +50,15 @@ function App() {
   const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
+    if (authLoading || needsLogin) return;   // don't hit the API until signed in
     const handler = setTimeout(() => { loadData(); }, 300);
     return () => clearTimeout(handler);
-  }, [page, sortField, sortDir, status, search, dateFrom, dateTo, needsReview]);
+  }, [authLoading, needsLogin, page, sortField, sortDir, status, search, dateFrom, dateTo, needsReview]);
 
-  useEffect(() => { loadStats(); }, []);
+  useEffect(() => {
+    if (authLoading || needsLogin) return;
+    loadStats();
+  }, [authLoading, needsLogin]);
 
   const loadData = async () => {
     setLoading(true);
@@ -137,8 +144,14 @@ function App() {
     await loadStats();
   };
 
+  if (authLoading) {
+    return <div className="app-splash">Loading…</div>;
+  }
+  if (needsLogin) {
+    return <Login />;
+  }
+
   return (
-    <AuthProvider>
     <div className="app-shell">
       {error && <div className="error-bar visible">{error}</div>}
 
@@ -204,13 +217,16 @@ function App() {
         <div className="admin-shell">
           <AdminUsers />
         </div>
+      ) : activeTab === 'account' ? (
+        <div className="account-shell">
+          <Account />
+        </div>
       ) : (
         <div className="history-shell">
           <GenerationHistory />
         </div>
       )}
     </div>
-    </AuthProvider>
   );
 }
 
