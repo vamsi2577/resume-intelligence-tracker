@@ -205,7 +205,7 @@ async def create_group(
 ) -> Group:
     existing = (await db.execute(select(Group).where(Group.name == name))).scalar_one_or_none()
     if existing is not None:
-        raise DuplicateError(str(existing.id))
+        raise DuplicateError(str(existing.id), resource="group")
     group = Group(id=uuid.uuid4(), name=name, description=description)
     db.add(group)
     await _audit(db, actor_id=actor_id, action="group.create", detail={"name": name})

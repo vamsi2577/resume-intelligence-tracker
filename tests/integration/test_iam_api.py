@@ -268,6 +268,8 @@ class TestGroupAdmin:
         assert (await client.post("/api/v1/admin/groups", json={"name": name})).status_code == 201
         resp = await client.post("/api/v1/admin/groups", json={"name": name})
         assert resp.status_code == 409
+        # Message names the right resource ("group"), not the legacy "application".
+        assert "group" in resp.json()["detail"].lower()
         # cleanup the created group
         gid = (await client.get("/api/v1/admin/groups")).json()
         for g in gid:

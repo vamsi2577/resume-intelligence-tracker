@@ -159,6 +159,9 @@ async def get_group(
 ):
     group = await iam_service.get_group_required(db, group_id)
     resp = GroupDetailResponse.model_validate(group)
+    # Two bounded aggregate queries (all roles, all member ids) — constant
+    # regardless of group size, not N+1. Cohorts are small; relationship
+    # eager-loading would be premature here.
     resp.roles = await iam_service.get_group_roles(db, group_id)
     resp.member_ids = await iam_service.get_group_member_ids(db, group_id)
     return resp
