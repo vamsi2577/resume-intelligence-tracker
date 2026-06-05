@@ -35,7 +35,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Resume Intelligence Tracker",
         description="Application logger and resume intelligence pipeline.",
-        version="0.2.0",
+        version="0.3.0",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,
@@ -71,6 +71,8 @@ def create_app() -> FastAPI:
     from src.api.resume_generator import router as resume_generator_router
     from src.api.base_resume import router as base_resume_router
     from src.api.generation_history import router as generation_history_router
+    from src.api.auth import router as auth_router
+    from src.api.admin import router as admin_router
 
     app.include_router(health_router)
     app.include_router(applications_router)
@@ -78,6 +80,8 @@ def create_app() -> FastAPI:
     app.include_router(resume_generator_router)
     app.include_router(base_resume_router)
     app.include_router(generation_history_router)
+    app.include_router(auth_router)
+    app.include_router(admin_router)
 
     # Email watcher (n8n integration) is optional. Disabled by default
     # in the unified product; flip ENABLE_EMAIL_WATCHER=true to expose

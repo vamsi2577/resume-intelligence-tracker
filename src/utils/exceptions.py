@@ -15,10 +15,16 @@ class NotFoundError(Exception):
 
 
 class DuplicateError(Exception):
-    """Hard duplicate — same company_name + job_id."""
-    def __init__(self, existing_id: str):
+    """A resource that must be unique already exists.
+
+    `resource` names what collided (e.g. "application", "group") so the error
+    message is meaningful per caller. Defaults to "application" for backward
+    compatibility with existing call sites.
+    """
+    def __init__(self, existing_id: str, resource: str = "application"):
         self.existing_id = existing_id
-        super().__init__(f"Duplicate application exists: {existing_id}")
+        self.resource = resource
+        super().__init__(f"Duplicate {resource} exists: {existing_id}")
 
 
 class ValidationError(Exception):

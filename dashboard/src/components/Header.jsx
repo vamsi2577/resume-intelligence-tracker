@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchHealth } from '../services/api';
+import { Can, PERMS } from '../auth';
 
 const ENV_COLORS = {
   development: { bg: '#dbeafe', fg: '#1d4ed8', label: 'DEV' },
@@ -68,6 +69,14 @@ export function Header({ stats, activeCount, activeTab, onTabChange }) {
         >
           ◷ Generation History
         </button>
+        <Can perm={PERMS.USERS_MANAGE}>
+          <button
+            className={`tab-btn ${activeTab === 'admin' ? 'active' : ''}`}
+            onClick={() => onTabChange('admin')}
+          >
+            ⚙ Manage Users
+          </button>
+        </Can>
       </div>
 
       <div className="header-right">
