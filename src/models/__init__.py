@@ -12,6 +12,16 @@ from src.models.user import User
 from src.models.application import ApplicationStatusHistory, JobApplication
 from src.models.base_resume import BaseResume
 from src.models.resume_generation import ResumeGeneration
+from src.models.iam import (
+    Group,
+    GroupMember,
+    GroupRole,
+    IamAuditLog,
+    Permission,
+    Role,
+    RolePermission,
+    UserRole,
+)
 
 __all__ = [
     "User",
@@ -19,4 +29,12 @@ __all__ = [
     "ApplicationStatusHistory",
     "BaseResume",
     "ResumeGeneration",
+    "Role",
+    "Permission",
+    "RolePermission",
+    "UserRole",
+    "Group",
+    "GroupMember",
+    "GroupRole",
+    "IamAuditLog",
 ]
