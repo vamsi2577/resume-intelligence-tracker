@@ -33,12 +33,14 @@ def _utcnow() -> datetime:
 
 async def _find_existing(
     db: AsyncSession,
+    owner_id: uuid.UUID,
     company_name: str,
     job_title: str,
     applied_date: date,
 ) -> JobApplication | None:
-    """Soft duplicate check: same company + job_title + date."""
+    """Soft duplicate check: same owner + company + job_title + date."""
     stmt = select(JobApplication).where(
+        JobApplication.owner_id == owner_id,
         func.lower(JobApplication.company_name) == company_name.lower(),
         func.lower(JobApplication.job_title) == job_title.lower(),
         JobApplication.applied_date == applied_date,
@@ -51,6 +53,7 @@ async def _find_existing(
 async def generate_and_log(
     db: AsyncSession,
     request: ResumeRequest,
+    owner_id: uuid.UUID,
 ) -> tuple[io.BytesIO, str, ResumeGenerateResponse]:
     """
     Generates DOCX and logs the application.
@@ -62,7 +65,7 @@ async def generate_and_log(
     duplicate_warning = False
 
     # ── Soft duplicate check ──────────────────────────────
-    existing = await _find_existing(db, request.target_company, request.job_title, today)
+    existing = await _find_existing(db, owner_id, request.target_company, request.job_title, today)
     if existing:
         duplicate_warning = True
         logger.info(
@@ -81,6 +84,7 @@ async def generate_and_log(
     app_id = uuid.uuid4()
     app = JobApplication(
         id=app_id,
+        owner_id=owner_id,
         company_name=request.target_company,
         job_title=request.job_title,
         source=ApplicationSource.resume_generator.value,

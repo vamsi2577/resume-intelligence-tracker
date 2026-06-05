@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.deps import get_current_owner
 from src.db.session import get_db
 from src.schemas.application import (
     ApplicationCreateRequest,
@@ -96,8 +97,9 @@ def _parse_filters(
 async def log_application(
     body: ApplicationCreateRequest,
     db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
 ):
-    return await application_service.create_application(db, body)
+    return await application_service.create_application(db, body, owner_id)
 
 
 @router.patch(
@@ -109,8 +111,9 @@ async def update_application(
     application_id: uuid.UUID,
     body: ApplicationUpdateRequest,
     db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
 ):
-    return await application_service.update_application(db, application_id, body)
+    return await application_service.update_application(db, application_id, body, owner_id)
 
 
 @router.get(
@@ -120,8 +123,9 @@ async def update_application(
 )
 async def get_stats(
     db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
 ):
-    return await application_service.get_stats(db)
+    return await application_service.get_stats(db, owner_id)
 
 
 @router.get(
@@ -132,8 +136,9 @@ async def get_stats(
 async def list_applications(
     filters: ApplicationFilters = Depends(_parse_filters),
     db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
 ):
-    return await application_service.get_applications(db, filters)
+    return await application_service.get_applications(db, filters, owner_id)
 
 
 @router.get(
@@ -144,8 +149,9 @@ async def list_applications(
 async def get_application(
     application_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
 ):
-    return await application_service.get_application_by_id(db, application_id)
+    return await application_service.get_application_by_id(db, application_id, owner_id)
 
 
 @router.get(
@@ -156,8 +162,9 @@ async def get_application(
 async def get_application_history(
     application_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
 ):
-    return await application_service.get_status_history(db, application_id)
+    return await application_service.get_status_history(db, application_id, owner_id)
 
 
 @router.delete(
@@ -168,10 +175,11 @@ async def get_application_history(
 async def soft_delete_application(
     application_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
 ):
     """Soft-delete: marks `is_deleted=true`. List endpoint hides it by
     default; pass `?include_deleted=true` to recover."""
-    return await application_service.delete_application(db, application_id)
+    return await application_service.delete_application(db, application_id, owner_id)
 
 
 @router.get(
@@ -181,6 +189,7 @@ async def soft_delete_application(
 async def download_application_resume(
     application_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
 ):
     """Re-render the stored résumé JSON as a DOCX for download.
 
@@ -192,7 +201,7 @@ async def download_application_resume(
     from src.schemas.resume_generator import ResumeRequest
     from src.utils.docx_builder import build_docx, build_filename
 
-    content = await application_service.get_resume_content(db, application_id)
+    content = await application_service.get_resume_content(db, application_id, owner_id)
     payload = ResumeRequest.model_validate(content)
     docx_stream = build_docx(payload)
     filename = build_filename(payload)

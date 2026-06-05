@@ -136,7 +136,7 @@ async def test_get_stats_math():
     result.one = MagicMock(return_value=agg)
     db.execute = AsyncMock(return_value=result)
 
-    stats = await audit.get_stats(db)
+    stats = await audit.get_stats(db, OWNER)
 
     assert stats.total == 4
     assert stats.success == 2
@@ -158,7 +158,7 @@ async def test_get_stats_empty():
     result.one = MagicMock(return_value=agg)
     db.execute = AsyncMock(return_value=result)
 
-    stats = await audit.get_stats(db)
+    stats = await audit.get_stats(db, OWNER)
     assert stats.total == 0
     assert stats.success_rate == 0.0
     assert stats.avg_duration_ms is None
