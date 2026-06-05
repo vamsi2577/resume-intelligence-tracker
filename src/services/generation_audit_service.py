@@ -155,9 +155,11 @@ async def attach_application(
         )
 
 
-async def list_recent(db, *, limit: int = 50) -> list[ResumeGeneration]:
+async def list_recent(db, owner_id: uuid.UUID, *, limit: int = 50) -> list[ResumeGeneration]:
+    # Owner-scoped: one tenant never sees another's generation history.
     stmt = (
         select(ResumeGeneration)
+        .where(ResumeGeneration.owner_id == owner_id)
         .order_by(ResumeGeneration.created_at.desc())
         .limit(limit)
     )
@@ -165,10 +167,12 @@ async def list_recent(db, *, limit: int = 50) -> list[ResumeGeneration]:
     return list(result.scalars().all())
 
 
-async def get_stats(db) -> GenerationStatsResponse:
+async def get_stats(db, owner_id: uuid.UUID) -> GenerationStatsResponse:
     # Aggregate in SQL — a single scan returning a handful of numbers —
     # rather than pulling every row into memory (the table grows one row
     # per generation). Mirrors application_service.get_stats.
+    # Owner-scoped so a tenant's success rate / token totals never include
+    # another tenant's generations.
     stmt = select(
         func.count().label("total"),
         func.count().filter(ResumeGeneration.status == "success").label("success"),
@@ -176,7 +180,7 @@ async def get_stats(db) -> GenerationStatsResponse:
         func.count().filter(ResumeGeneration.status == "validation_error").label("validation_error"),
         func.avg(ResumeGeneration.duration_ms).label("avg_duration"),
         func.coalesce(func.sum(ResumeGeneration.total_tokens), 0).label("total_tokens"),
-    )
+    ).where(ResumeGeneration.owner_id == owner_id)
     row = (await db.execute(stmt)).one()
 
     total = row.total or 0
