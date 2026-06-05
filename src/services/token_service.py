@@ -78,28 +78,37 @@ async def resolve_token(db: AsyncSession, raw: str) -> uuid.UUID:
 
     Validates: the hash exists, the token is not revoked, not expired, and the
     owning user still exists and is active. Updates last_used_at on success.
-    """
-    row = (await db.execute(
-        select(ApiToken).where(ApiToken.token_hash == _hash_token(raw))
-    )).scalar_one_or_none()
 
+    Runs on every bearer-authenticated request, so the token and its owner are
+    fetched in a single INNER JOIN (one round-trip). The inner join also means a
+    token whose owner row is somehow gone simply doesn't match → 401.
+    """
     now = _utcnow()
+    result = (await db.execute(
+        select(ApiToken, User)
+        .join(User, User.id == ApiToken.owner_id)
+        .where(ApiToken.token_hash == _hash_token(raw))
+    )).first()
+
+    if result is None:
+        raise UnauthorizedError("Invalid or expired API token")
+    token, user = result
+
     if (
-        row is None
-        or row.revoked_at is not None
-        or (row.expires_at is not None and row.expires_at <= now)
+        token.revoked_at is not None
+        or (token.expires_at is not None and token.expires_at <= now)
+        or not user.is_active
     ):
         raise UnauthorizedError("Invalid or expired API token")
 
-    # The token is only as valid as its owner.
-    user = (await db.execute(
-        select(User).where(User.id == row.owner_id)
-    )).scalar_one_or_none()
-    if user is None or not user.is_active:
-        raise UnauthorizedError("Invalid or expired API token")
-
-    row.last_used_at = now
-    return row.owner_id
+    token.last_used_at = now
+    # Flush the usage stamp now so the UPDATE is emitted within this request's
+    # transaction (deterministic ordering, surfaces DB errors here rather than
+    # later). Note: last_used_at is best-effort — it shares the request's
+    # transaction, so a later rollback still discards it, which is fine for
+    # "last seen" metadata.
+    await db.flush()
+    return token.owner_id
 
 
 async def list_tokens(db: AsyncSession, owner_id: uuid.UUID) -> list[ApiToken]:
