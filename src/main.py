@@ -8,6 +8,9 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from src.core.config import settings
+# Import the model registry so every table (incl. users) is on Base.metadata
+# before any FK is resolved — see src/models/__init__.py.
+from src import models as _models  # noqa: F401
 from src.utils.logger import configure_root_logger, get_logger
 from src.api.middleware import (
     CorrelationIDMiddleware,
@@ -32,7 +35,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Resume Intelligence Tracker",
         description="Application logger and resume intelligence pipeline.",
-        version="0.1.0",
+        version="0.2.0",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,

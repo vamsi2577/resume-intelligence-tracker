@@ -50,10 +50,30 @@ def _make_history(application_id: uuid.UUID, status: str, note: str | None = Non
     )
 
 
+async def _get_owned(
+    db: AsyncSession, application_id: uuid.UUID, owner_id: uuid.UUID
+) -> JobApplication:
+    """Fetch an application scoped to its owner.
+
+    Replaces a bare `db.get(...)` PK lookup: a row owned by a different
+    tenant resolves to NotFoundError (→ 404), never leaking that it exists
+    (closes the IDOR).
+    """
+    stmt = select(JobApplication).where(
+        JobApplication.id == application_id,
+        JobApplication.owner_id == owner_id,
+    )
+    app = (await db.execute(stmt)).scalar_one_or_none()
+    if app is None:
+        raise NotFoundError("Application", str(application_id))
+    return app
+
+
 # ── Duplicate detection ───────────────────────────────────
 
 async def _check_duplicates(
     db: AsyncSession,
+    owner_id: uuid.UUID,
     company_name: str,
     job_title: str,
     applied_date,
@@ -63,11 +83,15 @@ async def _check_duplicates(
     """
     Returns True if a soft duplicate warning should be raised.
     Raises DuplicateError for hard duplicates (company + job_id).
+
+    Duplicate detection is per-owner: User B's "JOB123" never collides with
+    User A's.
     """
     # Hard duplicate: same company + job_id (ignore soft-deleted rows so
     # the user can re-apply after deleting the old entry).
     if job_id:
         stmt = select(JobApplication).where(
+            JobApplication.owner_id == owner_id,
             JobApplication.company_name == company_name,
             JobApplication.job_id == job_id,
             JobApplication.is_deleted == False,  # noqa: E712
@@ -81,6 +105,7 @@ async def _check_duplicates(
 
     # Soft duplicate: same company + title + date
     stmt = select(JobApplication).where(
+        JobApplication.owner_id == owner_id,
         JobApplication.company_name == company_name,
         JobApplication.job_title == job_title,
         JobApplication.applied_date == applied_date,
@@ -99,9 +124,11 @@ async def _check_duplicates(
 async def create_application(
     db: AsyncSession,
     data: ApplicationCreateRequest,
+    owner_id: uuid.UUID,
 ) -> ApplicationResponse:
     duplicate_warning = await _check_duplicates(
         db,
+        owner_id=owner_id,
         company_name=data.company_name,
         job_title=data.job_title,
         applied_date=data.applied_date,
@@ -110,6 +137,7 @@ async def create_application(
 
     app = JobApplication(
         id=uuid.uuid4(),
+        owner_id=owner_id,
         **data.model_dump(),
     )
     db.add(app)
@@ -138,10 +166,9 @@ async def update_application(
     db: AsyncSession,
     application_id: uuid.UUID,
     data: ApplicationUpdateRequest,
+    owner_id: uuid.UUID,
 ) -> ApplicationResponse:
-    app = await db.get(JobApplication, application_id)
-    if not app:
-        raise NotFoundError("Application", str(application_id))
+    app = await _get_owned(db, application_id, owner_id)
 
     previous_status = app.status
     updated_fields = data.model_dump(exclude_none=True)
@@ -173,10 +200,9 @@ async def update_application(
 async def get_application_by_id(
     db: AsyncSession,
     application_id: uuid.UUID,
+    owner_id: uuid.UUID,
 ) -> ApplicationResponse:
-    app = await db.get(JobApplication, application_id)
-    if not app:
-        raise NotFoundError("Application", str(application_id))
+    app = await _get_owned(db, application_id, owner_id)
     return ApplicationResponse.model_validate(app)
 
 
@@ -184,8 +210,10 @@ async def get_application_by_id(
 async def get_applications(
     db: AsyncSession,
     filters: ApplicationFilters,
+    owner_id: uuid.UUID,
 ) -> ApplicationListResponse:
-    stmt = select(JobApplication)
+    # Tenant scope first — everything below filters within the owner's rows.
+    stmt = select(JobApplication).where(JobApplication.owner_id == owner_id)
 
     # ── Filters ───────────────────────────────────────────
     if filters.company:
@@ -251,9 +279,15 @@ async def get_applications(
 
 
 @track_db_query("get_stats")
-async def get_stats(db: AsyncSession) -> StatsResponse:
-    """Aggregated dashboard metrics. Soft-deleted rows are excluded."""
-    base_where = JobApplication.is_deleted == False  # noqa: E712
+async def get_stats(db: AsyncSession, owner_id: uuid.UUID) -> StatsResponse:
+    """Aggregated dashboard metrics. Soft-deleted rows are excluded.
+
+    Scoped to the owner — one tenant's stats never include another's rows.
+    """
+    base_where = and_(
+        JobApplication.owner_id == owner_id,
+        JobApplication.is_deleted == False,  # noqa: E712
+    )
 
     # ── 1. Headline counts ────────────────────────────────
     counts_stmt = select(
@@ -329,15 +363,14 @@ async def get_stats(db: AsyncSession) -> StatsResponse:
 async def delete_application(
     db: AsyncSession,
     application_id: uuid.UUID,
+    owner_id: uuid.UUID,
 ) -> ApplicationResponse:
     """Soft-delete: set is_deleted=true and append a history note.
 
     Hard deletes are intentionally not exposed; callers can re-list with
     ApplicationFilters.include_deleted=True to recover a row.
     """
-    app = await db.get(JobApplication, application_id)
-    if not app:
-        raise NotFoundError("Application", str(application_id))
+    app = await _get_owned(db, application_id, owner_id)
     if app.is_deleted:
         # Idempotent: deleting an already-deleted row is a no-op.
         return ApplicationResponse.model_validate(app)
@@ -356,16 +389,15 @@ async def delete_application(
 async def get_resume_content(
     db: AsyncSession,
     application_id: uuid.UUID,
+    owner_id: uuid.UUID,
 ) -> dict:
     """Return the stored ResumeRequest JSON for re-rendering as DOCX.
 
-    Raises NotFoundError if the application doesn't exist or was logged
-    without `resume_content` (e.g. created via the manual `log-application`
-    flow, no résumé generation).
+    Raises NotFoundError if the application doesn't exist, belongs to another
+    owner, or was logged without `resume_content` (e.g. created via the manual
+    `log-application` flow, no résumé generation).
     """
-    app = await db.get(JobApplication, application_id)
-    if not app:
-        raise NotFoundError("Application", str(application_id))
+    app = await _get_owned(db, application_id, owner_id)
     if not app.resume_content:
         raise NotFoundError("ResumeContent", str(application_id))
     return app.resume_content
@@ -375,11 +407,11 @@ async def get_resume_content(
 async def get_status_history(
     db: AsyncSession,
     application_id: uuid.UUID,
+    owner_id: uuid.UUID,
 ) -> list[StatusHistoryResponse]:
-    # Verify application exists
-    app = await db.get(JobApplication, application_id)
-    if not app:
-        raise NotFoundError("Application", str(application_id))
+    # Verify the application exists AND belongs to this owner before reading
+    # its history (history has no owner_id of its own — it inherits via parent).
+    await _get_owned(db, application_id, owner_id)
 
     stmt = (
         select(ApplicationStatusHistory)

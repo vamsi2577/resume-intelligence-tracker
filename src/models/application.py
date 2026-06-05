@@ -14,7 +14,15 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.config import settings
 from src.db.base import Base
+
+
+def _default_owner_id() -> uuid.UUID:
+    """Phase 1: every row is owned by the single default tenant until auth
+    (Phase 2) supplies a real owner. Used as the column default so existing
+    insert paths keep working without changes."""
+    return uuid.UUID(settings.DEFAULT_OWNER_ID)
 
 # ── Enums ─────────────────────────────────────────────────
 
@@ -53,6 +61,16 @@ class JobApplication(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
 
+    # ── Ownership (Phase 1 multi-tenancy) ─────────────────
+    # NOT NULL; defaults to the single tenant until Phase 2 threads a real
+    # owner_id from auth. CASCADE so deleting a user erases their data.
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        default=_default_owner_id,
+    )
+
     # ── Mandatory fields ──────────────────────────────────
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
     job_title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -89,10 +107,16 @@ class JobApplication(Base):
 
     # ── Indexes ───────────────────────────────────────────
     __table_args__ = (
+        Index("ix_job_applications_owner_id", "owner_id"),
+        # Serves the default owner-scoped list:
+        #   WHERE owner_id=? AND is_deleted=false ORDER BY applied_date DESC
+        Index("ix_job_applications_owner_active_date", "owner_id", "is_deleted", "applied_date"),
         Index("ix_job_applications_company_name", "company_name"),
         Index("ix_job_applications_status", "status"),
         Index("ix_job_applications_applied_date", "applied_date"),
-        Index("ix_job_applications_company_job_id", "company_name", "job_id"),
+        # Duplicate detection is per-owner now: User B's "JOB123" must not
+        # collide with User A's.
+        Index("ix_job_applications_owner_company_job_id", "owner_id", "company_name", "job_id"),
         Index("ix_job_applications_is_deleted", "is_deleted"),
     )
 

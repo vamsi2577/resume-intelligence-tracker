@@ -62,13 +62,14 @@ def _docx_response(
 async def generate_resume(
     request: ResumeRequest,
     db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
 ) -> StreamingResponse:
     """
     Accepts pre-structured résumé JSON (legacy / ChatGPT flow).
     Generates a .docx file, logs the application, and returns the file.
     """
     docx_stream, filename, metadata = await resume_generator_service.generate_and_log(
-        db, request
+        db, request, owner_id
     )
     logger.info(
         "Resume generated and application logged",
@@ -119,7 +120,7 @@ async def generate_resume_from_jd(
         return JDResumePreviewResponse(tailored=tailored)
 
     docx_stream, filename, metadata = await resume_generator_service.generate_and_log(
-        db, tailored
+        db, tailored, owner_id
     )
     # Link the audit row written during tailoring to the application it
     # produced (best-effort; never blocks the response).

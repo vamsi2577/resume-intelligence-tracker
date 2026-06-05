@@ -21,6 +21,9 @@ from src.schemas.application import (
 )
 from src.utils.exceptions import DuplicateError, NotFoundError
 
+# Phase 1: services are owner-scoped; unit tests pass a fixed owner.
+OWNER = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 
 # ── Helpers ───────────────────────────────────────────────
 
@@ -70,12 +73,16 @@ def _make_db(app=None, scalar_result=None) -> AsyncMock:
     db = AsyncMock()
     mock_app = app or _mock_app()
 
-    # db.get() returns the mock app
+    # db.get() returns the mock app (kept for any legacy callers)
     db.get = AsyncMock(return_value=mock_app)
 
-    # db.execute() returns a result whose scalar_one_or_none / scalar_one works
+    # db.execute() returns a result whose scalar_one_or_none / scalar_one works.
+    # owner-scoped lookups (_get_owned) resolve via scalar_one_or_none — default
+    # it to the mock app so "found" cases work; not-found tests override it.
     exec_result = MagicMock()
-    exec_result.scalar_one_or_none = MagicMock(return_value=scalar_result)
+    exec_result.scalar_one_or_none = MagicMock(
+        return_value=mock_app if scalar_result is None else scalar_result
+    )
     exec_result.scalar_one = MagicMock(return_value=0)
     exec_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
     db.execute = AsyncMock(return_value=exec_result)
@@ -96,7 +103,7 @@ class TestCreateApplication:
 
         with patch("src.services.application_service.ApplicationResponse.model_validate",
                    return_value=MagicMock(duplicate_warning=False)):
-            result = await create_application(db, _valid_create())
+            result = await create_application(db, _valid_create(), OWNER)
 
         db.add.assert_called()
         db.flush.assert_called_once()
@@ -108,7 +115,7 @@ class TestCreateApplication:
 
         with patch("src.services.application_service.ApplicationResponse.model_validate",
                    return_value=MagicMock(duplicate_warning=False)):
-            await create_application(db, _valid_create())
+            await create_application(db, _valid_create(), OWNER)
 
         # add() called at least twice: once for app, once for history
         assert db.add.call_count >= 2
@@ -124,7 +131,7 @@ class TestCreateApplication:
             side_effect=DuplicateError("existing-uuid"),
         ):
             with pytest.raises(DuplicateError):
-                await create_application(db, _valid_create(job_id="JOB123"))
+                await create_application(db, _valid_create(job_id="JOB123"), OWNER)
 
     @pytest.mark.asyncio
     async def test_soft_duplicate_returns_warning_flag(self):
@@ -137,7 +144,7 @@ class TestCreateApplication:
         with patch("src.services.application_service._check_duplicates", return_value=True), \
              patch("src.services.application_service.ApplicationResponse.model_validate",
                    return_value=mock_response):
-            result = await create_application(db, _valid_create())
+            result = await create_application(db, _valid_create(), OWNER)
 
         assert result.duplicate_warning is True
 
@@ -152,7 +159,7 @@ class TestCreateApplication:
         with patch("src.services.application_service._check_duplicates", return_value=False), \
              patch("src.services.application_service.ApplicationResponse.model_validate",
                    return_value=mock_response):
-            result = await create_application(db, _valid_create())
+            result = await create_application(db, _valid_create(), OWNER)
 
         assert result.duplicate_warning is False
 
@@ -167,7 +174,7 @@ class TestUpdateApplication:
 
         with patch("src.services.application_service.ApplicationResponse.model_validate",
                    return_value=MagicMock()):
-            await update_application(db, mock_app.id, ApplicationUpdateRequest(notes="new note"))
+            await update_application(db, mock_app.id, ApplicationUpdateRequest(notes="new note"), OWNER)
 
         assert mock_app.notes == "new note"
 
@@ -175,10 +182,12 @@ class TestUpdateApplication:
     async def test_not_found_raises(self):
         from src.services.application_service import update_application
         db, _ = _make_db()
-        db.get = AsyncMock(return_value=None)
+        # owner-scoped lookup misses → scalar_one_or_none returns None
+        db.execute = AsyncMock(return_value=MagicMock(
+            scalar_one_or_none=MagicMock(return_value=None)))
 
         with pytest.raises(NotFoundError):
-            await update_application(db, uuid.uuid4(), ApplicationUpdateRequest(notes="x"))
+            await update_application(db, uuid.uuid4(), ApplicationUpdateRequest(notes="x"), OWNER)
 
     @pytest.mark.asyncio
     async def test_status_change_writes_history(self):
@@ -189,7 +198,7 @@ class TestUpdateApplication:
         with patch("src.services.application_service.ApplicationResponse.model_validate",
                    return_value=MagicMock()):
             await update_application(
-                db, mock_app.id, ApplicationUpdateRequest(status="interview")
+                db, mock_app.id, ApplicationUpdateRequest(status="interview"), OWNER
             )
 
         # History row added
@@ -204,7 +213,7 @@ class TestUpdateApplication:
         with patch("src.services.application_service.ApplicationResponse.model_validate",
                    return_value=MagicMock()):
             await update_application(
-                db, mock_app.id, ApplicationUpdateRequest(status="applied")
+                db, mock_app.id, ApplicationUpdateRequest(status="applied"), OWNER
             )
 
         # add() NOT called for history (status unchanged)
@@ -221,7 +230,7 @@ class TestGetApplicationById:
 
         with patch("src.services.application_service.ApplicationResponse.model_validate",
                    return_value=MagicMock()):
-            result = await get_application_by_id(db, mock_app.id)
+            result = await get_application_by_id(db, mock_app.id, OWNER)
 
         assert result is not None
 
@@ -229,10 +238,12 @@ class TestGetApplicationById:
     async def test_not_found_raises(self):
         from src.services.application_service import get_application_by_id
         db, _ = _make_db()
-        db.get = AsyncMock(return_value=None)
+        # owner-scoped lookup misses → scalar_one_or_none returns None
+        db.execute = AsyncMock(return_value=MagicMock(
+            scalar_one_or_none=MagicMock(return_value=None)))
 
         with pytest.raises(NotFoundError):
-            await get_application_by_id(db, uuid.uuid4())
+            await get_application_by_id(db, uuid.uuid4(), OWNER)
 
 
 # ── get_applications ──────────────────────────────────────
@@ -243,7 +254,7 @@ class TestGetApplications:
         from src.services.application_service import get_applications
         db, _ = _make_db()
 
-        result = await get_applications(db, ApplicationFilters())
+        result = await get_applications(db, ApplicationFilters(), OWNER)
         assert result.data == []
         assert result.pagination.total == 0
 
@@ -252,7 +263,7 @@ class TestGetApplications:
         from src.services.application_service import get_applications
         db, _ = _make_db()
 
-        result = await get_applications(db, ApplicationFilters())
+        result = await get_applications(db, ApplicationFilters(), OWNER)
         assert result.data == []
 
     @pytest.mark.asyncio
@@ -260,7 +271,7 @@ class TestGetApplications:
         from src.services.application_service import get_applications
         db, _ = _make_db()
 
-        result = await get_applications(db, ApplicationFilters(page=99))
+        result = await get_applications(db, ApplicationFilters(page=99), OWNER)
         assert result.data == []
 
     @pytest.mark.asyncio
@@ -270,7 +281,7 @@ class TestGetApplications:
 
         # Schema enforces max 100 — verify it doesn't blow up
         filters = ApplicationFilters(limit=100)
-        result = await get_applications(db, filters)
+        result = await get_applications(db, filters, OWNER)
         assert result.pagination.limit == 100
 
     @pytest.mark.asyncio
@@ -307,7 +318,7 @@ class TestGetStats:
         trend_rows = [(date(2026, 5, 18), 3), (date(2026, 5, 25), 2)]
         db.execute = self._mock_execute_for(counts, source_rows, trend_rows)
 
-        stats = await get_stats(db)
+        stats = await get_stats(db, OWNER)
         assert stats.total == 5
         assert stats.interview == 1
         assert stats.rejected == 2
@@ -329,7 +340,7 @@ class TestGetStats:
         )
         db.execute = self._mock_execute_for(counts, [], [])
 
-        stats = await get_stats(db)
+        stats = await get_stats(db, OWNER)
         assert stats.total == 0
         assert stats.ats_pass_rate == 0.0
         assert stats.source_breakdown.manual == 0
@@ -345,14 +356,16 @@ class TestGetStatusHistory:
         from src.services.application_service import get_status_history
         db, mock_app = _make_db()
 
-        result = await get_status_history(db, mock_app.id)
+        result = await get_status_history(db, mock_app.id, OWNER)
         assert result == []
 
     @pytest.mark.asyncio
     async def test_not_found_raises(self):
         from src.services.application_service import get_status_history
         db, _ = _make_db()
-        db.get = AsyncMock(return_value=None)
+        # owner-scoped parent lookup misses → scalar_one_or_none returns None
+        db.execute = AsyncMock(return_value=MagicMock(
+            scalar_one_or_none=MagicMock(return_value=None)))
 
         with pytest.raises(NotFoundError):
-            await get_status_history(db, uuid.uuid4())
+            await get_status_history(db, uuid.uuid4(), OWNER)

@@ -23,6 +23,9 @@ from src.schemas.resume_generator import (
     SummaryObject,
 )
 
+# Phase 1: generate_and_log is owner-scoped.
+OWNER = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 
 # ── Fixtures ──────────────────────────────────────────────
 
@@ -97,7 +100,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            stream, filename, metadata = await generate_and_log(db, _minimal_request())
+            stream, filename, metadata = await generate_and_log(db, _minimal_request(), OWNER)
 
         assert stream is FAKE_STREAM
         assert filename == FAKE_FILENAME
@@ -111,7 +114,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            await generate_and_log(db, _minimal_request())
+            await generate_and_log(db, _minimal_request(), OWNER)
 
         # add() called at least twice: application + history
         assert db.add.call_count >= 2
@@ -123,7 +126,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            await generate_and_log(db, _minimal_request())
+            await generate_and_log(db, _minimal_request(), OWNER)
 
         db.flush.assert_called_once()
 
@@ -134,7 +137,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            _, _, metadata = await generate_and_log(db, _minimal_request())
+            _, _, metadata = await generate_and_log(db, _minimal_request(), OWNER)
 
         assert metadata.duplicate_warning is False
 
@@ -147,7 +150,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            _, _, metadata = await generate_and_log(db, _minimal_request())
+            _, _, metadata = await generate_and_log(db, _minimal_request(), OWNER)
 
         assert metadata.duplicate_warning is True
 
@@ -158,7 +161,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            _, _, metadata = await generate_and_log(db, _minimal_request())
+            _, _, metadata = await generate_and_log(db, _minimal_request(), OWNER)
 
         uuid.UUID(metadata.application_id)  # raises if invalid
 
@@ -170,7 +173,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            await generate_and_log(db, request)
+            await generate_and_log(db, request, OWNER)
 
         # Capture the JobApplication added to DB and verify job_description
         added_app = db.add.call_args_list[0][0][0]
@@ -183,7 +186,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            await generate_and_log(db, _full_request())
+            await generate_and_log(db, _full_request(), OWNER)
 
         added_app = db.add.call_args_list[0][0][0]
         assert isinstance(added_app.resume_content, dict)
@@ -196,7 +199,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            await generate_and_log(db, _minimal_request())
+            await generate_and_log(db, _minimal_request(), OWNER)
 
         added_app = db.add.call_args_list[0][0][0]
         assert added_app.source == "resume_generator"
@@ -208,7 +211,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            await generate_and_log(db, _minimal_request())
+            await generate_and_log(db, _minimal_request(), OWNER)
 
         added_app = db.add.call_args_list[0][0][0]
         assert added_app.status == "applied"
@@ -220,7 +223,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            await generate_and_log(db, _minimal_request())
+            await generate_and_log(db, _minimal_request(), OWNER)
 
         added_app = db.add.call_args_list[0][0][0]
         assert added_app.applied_date == date.today()
@@ -239,7 +242,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            await generate_and_log(db, request)
+            await generate_and_log(db, request, OWNER)
 
         added_app = db.add.call_args_list[0][0][0]
         assert added_app.location == "Austin, TX"
@@ -256,7 +259,7 @@ class TestGenerateAndLog:
 
         with patch("src.services.resume_generator_service.build_docx", return_value=FAKE_STREAM), \
              patch("src.services.resume_generator_service.build_filename", return_value=FAKE_FILENAME):
-            await generate_and_log(db, _minimal_request())
+            await generate_and_log(db, _minimal_request(), OWNER)
 
         added_app = db.add.call_args_list[0][0][0]
         assert added_app.location is None
