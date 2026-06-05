@@ -7,6 +7,8 @@ import { Pagination } from './components/Pagination';
 import { AppModal } from './components/AppModal';
 import { ResumeTab } from './components/ResumeTab';
 import { GenerationHistory } from './components/GenerationHistory';
+import { AdminUsers } from './components/AdminUsers';
+import { AuthProvider } from './auth';
 import {
   fetchApplications, fetchHistory, fetchStats,
   createApplication, updateApplication, deleteApplication,
@@ -136,6 +138,7 @@ function App() {
   };
 
   return (
+    <AuthProvider>
     <div className="app-shell">
       {error && <div className="error-bar visible">{error}</div>}
 
@@ -197,12 +200,17 @@ function App() {
         <div className="resume-shell">
           <ResumeTab onApplicationLogged={handleApplicationLogged} />
         </div>
+      ) : activeTab === 'admin' ? (
+        <div className="admin-shell">
+          <AdminUsers />
+        </div>
       ) : (
         <div className="history-shell">
           <GenerationHistory />
         </div>
       )}
     </div>
+    </AuthProvider>
   );
 }
 
