@@ -13,21 +13,45 @@ from __future__ import annotations
 import uuid
 from typing import Callable
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.db.session import get_db
-from src.services import iam_service
+from src.models.user import User
+from src.services import auth_service, iam_service
+from src.utils.exceptions import UnauthorizedError
 
 
-async def get_current_owner() -> uuid.UUID:
+async def get_current_owner(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> uuid.UUID:
     """Return the owning user/tenant UUID for the current request.
 
-    Phase 0–4: always returns the single configured default owner.
-    Phase 5: replaced with a real auth check (raises 401 on failure).
+    - REQUIRE_AUTH off (default): single configured default owner — no login
+      required, non-breaking.
+    - REQUIRE_AUTH on: resolve the session cookie's JWT to a real user id, then
+      confirm that user still exists and is active. Raise 401
+      (UnauthorizedError) when the cookie is missing/invalid, or the account
+      was deleted or deactivated — so an IAM deactivation takes effect on the
+      next request instead of lingering until the JWT expires.
     """
-    return uuid.UUID(settings.DEFAULT_OWNER_ID)
+    if not settings.REQUIRE_AUTH:
+        return uuid.UUID(settings.DEFAULT_OWNER_ID)
+
+    token = request.cookies.get(settings.SESSION_COOKIE_NAME)
+    if not token:
+        raise UnauthorizedError("Authentication required")
+
+    user_id = auth_service.decode_session(token)
+    user = (
+        await db.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise UnauthorizedError("Session is no longer valid")
+    return user_id
 
 
 def require_permission(permission: str) -> Callable:

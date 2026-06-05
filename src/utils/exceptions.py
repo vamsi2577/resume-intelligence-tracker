@@ -31,3 +31,9 @@ class ValidationError(Exception):
     """Service-level validation failure (distinct from Pydantic)."""
     def __init__(self, message: str):
         super().__init__(message)
+
+
+class UnauthorizedError(Exception):
+    """Authentication failed or is required (→ 401)."""
+    def __init__(self, message: str = "Authentication required"):
+        super().__init__(message)
