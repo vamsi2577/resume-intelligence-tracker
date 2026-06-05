@@ -11,10 +11,16 @@ from __future__ import annotations
 import uuid
 
 import sqlalchemy as sa
+from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from src.core.config import settings
 from src.db.base import Base
+
+
+def _default_owner_id() -> uuid.UUID:
+    return uuid.UUID(settings.DEFAULT_OWNER_ID)
 
 
 class BaseResume(Base):
@@ -23,10 +29,14 @@ class BaseResume(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    # Nullable now — populated with settings.DEFAULT_OWNER_ID via the
-    # auth seam. Phase 5 will make it non-null with a real FK.
-    owner_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True, unique=True
+    # Phase 1: NOT NULL FK to users; UNIQUE keeps it one base résumé per user.
+    # Defaults to the single tenant until Phase 2 supplies a real owner.
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        default=_default_owner_id,
     )
 
     # Plain text version of the master résumé — what we feed into the
