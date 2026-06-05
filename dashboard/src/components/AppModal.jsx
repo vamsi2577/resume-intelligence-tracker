@@ -30,7 +30,7 @@ export function AppModal({ isOpen, onClose, onCreate }) {
     setError(null);
     try {
       const payload = Object.fromEntries(
-        Object.entries(form).filter(([_, v]) => v !== '' && v !== null)
+        Object.entries(form).filter(([, v]) => v !== '' && v !== null)
       );
       await onCreate(payload);
       setForm(EMPTY);

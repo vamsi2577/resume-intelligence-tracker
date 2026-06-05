@@ -675,3 +675,99 @@
 
   a { color: var(--accent2); text-decoration: none; font-size: 13px; }
   a:hover { text-decoration: underline; }
+
+  /* ── Auth: splash + login ─────────────────────────────── */
+  .app-splash {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 14px;
+  }
+  .login-shell {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--bg); padding: 24px;
+  }
+  .login-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 36px 32px; width: 100%; max-width: 380px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.05);
+  }
+  .login-brand {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 18px;
+  }
+  .login-card h2 { font-size: 22px; margin: 0 0 6px; color: var(--text); }
+  .login-sub { font-size: 13px; color: var(--muted); margin: 0 0 20px; line-height: 1.5; }
+  .login-form { display: flex; flex-direction: column; gap: 12px; }
+  .login-form input {
+    padding: 11px 13px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 14px; font-family: 'Inter', system-ui, sans-serif; background: var(--surface);
+  }
+  .login-form input:focus { outline: none; border-color: var(--accent2); }
+  .login-error {
+    margin-top: 16px; padding: 10px 12px; border-radius: 8px;
+    background: rgba(220,38,38,0.07); border: 1px solid rgba(220,38,38,0.25);
+    color: var(--danger); font-size: 12px;
+  }
+
+  .user-chip {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 5px 12px; font-size: 12px; color: var(--muted);
+    cursor: pointer; font-family: 'Inter', system-ui, sans-serif; max-width: 200px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .user-chip:hover { border-color: var(--text); color: var(--text); }
+
+  /* ── Account / API tokens ─────────────────────────────── */
+  .account-shell { padding: 24px; }
+  .account { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .account-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px;
+  }
+  .account-card h2 { font-size: 17px; margin: 0 0 16px; color: var(--text); }
+  .account-sub { font-size: 13px; color: var(--muted); margin: -8px 0 18px; line-height: 1.5; }
+  .account-row { display: flex; gap: 16px; padding: 7px 0; font-size: 14px; }
+  .account-row .lbl { width: 80px; color: var(--muted); font-size: 12px; }
+  .account-error {
+    margin: 12px 0; padding: 10px 12px; border-radius: 8px;
+    background: rgba(220,38,38,0.07); border: 1px solid rgba(220,38,38,0.25);
+    color: var(--danger); font-size: 12px;
+  }
+  .account-empty { color: var(--muted); font-size: 13px; padding: 16px 0; }
+
+  .token-create {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px;
+  }
+  .token-create input, .token-create select {
+    padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 13px; font-family: 'Inter', system-ui, sans-serif; background: var(--surface);
+  }
+  .token-create input { flex: 1; min-width: 180px; }
+  .token-create input:focus, .token-create select:focus { outline: none; border-color: var(--accent2); }
+
+  .token-secret {
+    background: rgba(45,106,47,0.06); border: 1px solid rgba(45,106,47,0.25);
+    border-radius: 8px; padding: 14px; margin-bottom: 16px;
+  }
+  .token-secret-label { font-size: 12px; color: var(--accent3); font-weight: 600; margin-bottom: 8px; }
+  .token-secret-row { display: flex; gap: 10px; align-items: center; }
+  .token-secret-row code {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-size: 12px; word-break: break-all; color: var(--text);
+  }
+
+  .token-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .token-table th {
+    text-align: left; padding: 8px 10px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--muted); border-bottom: 1px solid var(--border);
+  }
+  .token-table td { padding: 10px; border-bottom: 1px solid var(--surface2); }
+  .token-table code { font-size: 12px; color: var(--muted); }
+  .token-dead td { opacity: 0.55; }
+
+  .pill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  }
+  .pill.live { background: rgba(45,106,47,0.12); color: var(--accent3); }
+  .pill.dead { background: var(--surface2); color: var(--muted); }
+  .btn-link.danger { color: var(--danger); }

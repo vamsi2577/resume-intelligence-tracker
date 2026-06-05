@@ -1,5 +1,38 @@
 export const API_BASE = '/api/v1';
 
+// ── Shared request helper + 401 interceptor ────────────────
+// A single place that turns a 401 into a global "you need to sign in" signal.
+// AuthProvider registers a handler here; any request that comes back 401 (e.g.
+// the session cookie expired mid-session) flips the app to the login screen.
+let _onUnauthorized = null;
+export function setUnauthorizedHandler(fn) { _onUnauthorized = fn; }
+
+export async function request(path, { method = 'GET', body } = {}) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const resp = await fetch(`${API_BASE}${path}`, opts);
+
+  if (resp.status === 401) {
+    if (_onUnauthorized) _onUnauthorized();
+    const err = new Error('Authentication required');
+    err.status = 401;
+    throw err;
+  }
+
+  // 204 / empty bodies are valid (e.g. token revoke).
+  const text = await resp.text();
+  const json = text ? JSON.parse(text) : null;
+  if (!resp.ok) {
+    const err = new Error((json && json.detail) || `HTTP ${resp.status}`);
+    err.status = resp.status;
+    throw err;
+  }
+  return json;
+}
+
 // Fetch the backend's /health to read its self-reported environment.
 // Cached on first call so the env badge doesn't ping the API repeatedly.
 let _healthCache = null;
@@ -21,7 +54,7 @@ export async function fetchHealth() {
 
 export async function fetchApplications(params) {
   const cleanParams = Object.fromEntries(
-    Object.entries(params).filter(([_, v]) => v != null && v !== '')
+    Object.entries(params).filter(([, v]) => v != null && v !== '')
   );
   const query = new URLSearchParams(cleanParams);
   const resp = await fetch(`${API_BASE}/applications?${query}`);
@@ -193,9 +226,43 @@ export async function fetchGenerationHistory(limit = 50) {
 // The caller's identity, roles, and effective permissions. The <Can> gate and
 // admin nav read this; the server still enforces every call.
 export async function fetchMe() {
-  const resp = await fetch(`${API_BASE}/auth/me`);
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return resp.json();   // { user_id, email, roles, permissions, plan_entitlements }
+  // Routed through request() so a 401 (auth on, not signed in) trips the
+  // global handler and the app shows the login screen.
+  return request('/auth/me');   // { user_id, email, roles, permissions }
+}
+
+// ── Magic-link sign-in (Phase 2) ─────────────────────────
+
+// Always resolves the same generic response — never reveals whether the
+// address has an account.
+export function requestLoginLink(email) {
+  return request('/auth/request-link', { method: 'POST', body: { email } });
+}
+
+// Consume a magic-link token; on success the server sets the session cookie.
+export function verifyLogin(token, email) {
+  const q = new URLSearchParams({ token, email });
+  return request(`/auth/verify?${q}`);   // { user_id, email }
+}
+
+export function logout() {
+  return request('/auth/logout', { method: 'POST' });
+}
+
+// ── Personal API tokens (Phase 2) ────────────────────────
+// Long-lived bearer credentials for non-browser clients (the H1B Scout
+// extension). The raw secret is returned exactly once, on create.
+
+export function fetchTokens() {
+  return request('/auth/tokens');   // [ TokenInfo, ... ]
+}
+
+export function createToken({ name, expires_in_days = null }) {
+  return request('/auth/tokens', { method: 'POST', body: { name, expires_in_days } });
+}
+
+export function revokeToken(id) {
+  return request(`/auth/tokens/${id}`, { method: 'DELETE' });   // 204
 }
 
 export async function fetchAdminUsers({ limit = 100, offset = 0 } = {}) {
