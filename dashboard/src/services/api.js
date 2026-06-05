@@ -187,3 +187,56 @@ export async function fetchGenerationHistory(limit = 50) {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();   // { data: [...], stats: {...} }
 }
+
+// ── IAM / auth (Phase 1b) ────────────────────────────────
+
+// The caller's identity, roles, and effective permissions. The <Can> gate and
+// admin nav read this; the server still enforces every call.
+export async function fetchMe() {
+  const resp = await fetch(`${API_BASE}/auth/me`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();   // { user_id, email, roles, permissions, plan_entitlements }
+}
+
+export async function fetchAdminUsers({ limit = 100, offset = 0 } = {}) {
+  const resp = await fetch(`${API_BASE}/admin/users?limit=${limit}&offset=${offset}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();   // [ {id, email, is_active, created_at}, ... ]
+}
+
+export async function fetchAdminUser(id) {
+  const resp = await fetch(`${API_BASE}/admin/users/${id}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();   // { ...user, roles: [...] }
+}
+
+export async function fetchRoles() {
+  const resp = await fetch(`${API_BASE}/admin/roles`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();   // [ {id, name, description, is_system}, ... ]
+}
+
+export async function assignRole(userId, role) {
+  const resp = await fetch(`${API_BASE}/admin/users/${userId}/roles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();   // { user_id, roles: [...] }
+}
+
+export async function revokeRole(userId, role) {
+  const resp = await fetch(`${API_BASE}/admin/users/${userId}/roles/${encodeURIComponent(role)}`, {
+    method: 'DELETE',
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();   // { user_id, roles: [...] }
+}
+
+export async function setUserActive(userId, active) {
+  const action = active ? 'activate' : 'deactivate';
+  const resp = await fetch(`${API_BASE}/admin/users/${userId}/${action}`, { method: 'POST' });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();   // updated user
+}
