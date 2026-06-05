@@ -27,9 +27,16 @@ from src.api.deps import require_permission
 from src.core.permissions import Permissions
 from src.db.session import get_db
 from src.schemas.iam import (
+    AddMemberRequest,
     AdminUserDetailResponse,
     AdminUserResponse,
     AssignRoleRequest,
+    CreateGroupRequest,
+    GroupDetailResponse,
+    GroupMembersResponse,
+    GroupResponse,
+    GroupRoleRequest,
+    GroupRolesResponse,
     RoleResponse,
     RolesResponse,
 )
@@ -119,3 +126,92 @@ async def list_roles(
 ):
     roles = await iam_service.list_roles(db)
     return [RoleResponse.model_validate(r) for r in roles]
+
+
+# ── Groups (cohorts) — all behind groups.manage ───────────
+
+@router.get("/groups", response_model=list[GroupResponse])
+async def list_groups(
+    db: AsyncSession = Depends(get_db),
+    _actor: uuid.UUID = Depends(require_permission(Permissions.GROUPS_MANAGE)),
+):
+    groups = await iam_service.list_groups(db)
+    return [GroupResponse.model_validate(g) for g in groups]
+
+
+@router.post("/groups", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
+async def create_group(
+    body: CreateGroupRequest,
+    db: AsyncSession = Depends(get_db),
+    actor: uuid.UUID = Depends(require_permission(Permissions.GROUPS_MANAGE)),
+):
+    group = await iam_service.create_group(
+        db, actor_id=actor, name=body.name, description=body.description
+    )
+    return GroupResponse.model_validate(group)
+
+
+@router.get("/groups/{group_id}", response_model=GroupDetailResponse)
+async def get_group(
+    group_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _actor: uuid.UUID = Depends(require_permission(Permissions.GROUPS_MANAGE)),
+):
+    group = await iam_service.get_group_required(db, group_id)
+    resp = GroupDetailResponse.model_validate(group)
+    resp.roles = await iam_service.get_group_roles(db, group_id)
+    resp.member_ids = await iam_service.get_group_member_ids(db, group_id)
+    return resp
+
+
+@router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_group(
+    group_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: uuid.UUID = Depends(require_permission(Permissions.GROUPS_MANAGE)),
+):
+    await iam_service.delete_group(db, actor_id=actor, group_id=group_id)
+
+
+@router.post("/groups/{group_id}/members", response_model=GroupMembersResponse)
+async def add_group_member(
+    group_id: uuid.UUID,
+    body: AddMemberRequest,
+    db: AsyncSession = Depends(get_db),
+    actor: uuid.UUID = Depends(require_permission(Permissions.GROUPS_MANAGE)),
+):
+    members = await iam_service.add_member(db, actor_id=actor, group_id=group_id, user_id=body.user_id)
+    return GroupMembersResponse(group_id=group_id, member_ids=members)
+
+
+@router.delete("/groups/{group_id}/members/{user_id}", response_model=GroupMembersResponse)
+async def remove_group_member(
+    group_id: uuid.UUID,
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: uuid.UUID = Depends(require_permission(Permissions.GROUPS_MANAGE)),
+):
+    members = await iam_service.remove_member(db, actor_id=actor, group_id=group_id, user_id=user_id)
+    return GroupMembersResponse(group_id=group_id, member_ids=members)
+
+
+@router.post("/groups/{group_id}/roles", response_model=GroupRolesResponse)
+async def add_group_role(
+    group_id: uuid.UUID,
+    body: GroupRoleRequest,
+    db: AsyncSession = Depends(get_db),
+    actor: uuid.UUID = Depends(require_permission(Permissions.GROUPS_MANAGE)),
+):
+    roles = await iam_service.add_group_role(db, actor_id=actor, group_id=group_id, role_name=body.role)
+    return GroupRolesResponse(group_id=group_id, roles=roles)
+
+
+@router.delete("/groups/{group_id}/roles/{role}", response_model=GroupRolesResponse)
+async def remove_group_role(
+    group_id: uuid.UUID,
+    role: str,
+    db: AsyncSession = Depends(get_db),
+    actor: uuid.UUID = Depends(require_permission(Permissions.GROUPS_MANAGE)),
+):
+    roles = await iam_service.remove_group_role(db, actor_id=actor, group_id=group_id, role_name=role)
+    return GroupRolesResponse(group_id=group_id, roles=roles)
