@@ -19,6 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.iam import (
+    Group,
     GroupMember,
     GroupRole,
     IamAuditLog,
@@ -28,7 +29,7 @@ from src.models.iam import (
     UserRole,
 )
 from src.models.user import User
-from src.utils.exceptions import NotFoundError
+from src.utils.exceptions import DuplicateError, NotFoundError
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -164,3 +165,120 @@ async def revoke_role(
     )
     await db.flush()
     return await get_role_names(db, user_id)
+
+
+# ── Groups (cohorts) ──────────────────────────────────────
+
+async def get_group_required(db: AsyncSession, group_id: uuid.UUID) -> Group:
+    group = await db.get(Group, group_id)
+    if group is None:
+        raise NotFoundError("Group", str(group_id))
+    return group
+
+
+async def _role_by_name(db: AsyncSession, role_name: str) -> Role:
+    role = (await db.execute(select(Role).where(Role.name == role_name))).scalar_one_or_none()
+    if role is None:
+        raise NotFoundError("Role", role_name)
+    return role
+
+
+async def list_groups(db: AsyncSession) -> list[Group]:
+    return list((await db.execute(select(Group).order_by(Group.name))).scalars().all())
+
+
+async def get_group_roles(db: AsyncSession, group_id: uuid.UUID) -> list[str]:
+    stmt = (
+        select(Role.name).join(GroupRole, GroupRole.role_id == Role.id)
+        .where(GroupRole.group_id == group_id)
+    )
+    return sorted(r[0] for r in (await db.execute(stmt)).all())
+
+
+async def get_group_member_ids(db: AsyncSession, group_id: uuid.UUID) -> list[uuid.UUID]:
+    stmt = select(GroupMember.user_id).where(GroupMember.group_id == group_id)
+    return [r[0] for r in (await db.execute(stmt)).all()]
+
+
+async def create_group(
+    db: AsyncSession, *, actor_id: uuid.UUID, name: str, description: str | None = None
+) -> Group:
+    existing = (await db.execute(select(Group).where(Group.name == name))).scalar_one_or_none()
+    if existing is not None:
+        raise DuplicateError(str(existing.id), resource="group")
+    group = Group(id=uuid.uuid4(), name=name, description=description)
+    db.add(group)
+    await _audit(db, actor_id=actor_id, action="group.create", detail={"name": name})
+    await db.flush()
+    await db.refresh(group)
+    return group
+
+
+async def delete_group(db: AsyncSession, *, actor_id: uuid.UUID, group_id: uuid.UUID) -> None:
+    group = await get_group_required(db, group_id)
+    await _audit(db, actor_id=actor_id, action="group.delete", detail={"name": group.name})
+    await db.delete(group)  # CASCADE clears group_members / group_roles
+    await db.flush()
+
+
+async def add_member(
+    db: AsyncSession, *, actor_id: uuid.UUID, group_id: uuid.UUID, user_id: uuid.UUID
+) -> list[uuid.UUID]:
+    await get_group_required(db, group_id)
+    await get_user(db, user_id)
+    existing = (await db.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.user_id == user_id
+        )
+    )).scalar_one_or_none()
+    if existing is None:
+        db.add(GroupMember(group_id=group_id, user_id=user_id, added_by=actor_id))
+        await _audit(db, actor_id=actor_id, action="group.add_member",
+                     target_id=user_id, detail={"group_id": str(group_id)})
+    await db.flush()
+    return await get_group_member_ids(db, group_id)
+
+
+async def remove_member(
+    db: AsyncSession, *, actor_id: uuid.UUID, group_id: uuid.UUID, user_id: uuid.UUID
+) -> list[uuid.UUID]:
+    await get_group_required(db, group_id)
+    await db.execute(
+        delete(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.user_id == user_id
+        )
+    )
+    await _audit(db, actor_id=actor_id, action="group.remove_member",
+                 target_id=user_id, detail={"group_id": str(group_id)})
+    await db.flush()
+    return await get_group_member_ids(db, group_id)
+
+
+async def add_group_role(
+    db: AsyncSession, *, actor_id: uuid.UUID, group_id: uuid.UUID, role_name: str
+) -> list[str]:
+    await get_group_required(db, group_id)
+    role = await _role_by_name(db, role_name)
+    existing = (await db.execute(
+        select(GroupRole).where(GroupRole.group_id == group_id, GroupRole.role_id == role.id)
+    )).scalar_one_or_none()
+    if existing is None:
+        db.add(GroupRole(group_id=group_id, role_id=role.id))
+        await _audit(db, actor_id=actor_id, action="group.grant_role",
+                     detail={"group_id": str(group_id), "role": role_name})
+    await db.flush()
+    return await get_group_roles(db, group_id)
+
+
+async def remove_group_role(
+    db: AsyncSession, *, actor_id: uuid.UUID, group_id: uuid.UUID, role_name: str
+) -> list[str]:
+    await get_group_required(db, group_id)
+    role = await _role_by_name(db, role_name)
+    await db.execute(
+        delete(GroupRole).where(GroupRole.group_id == group_id, GroupRole.role_id == role.id)
+    )
+    await _audit(db, actor_id=actor_id, action="group.revoke_role",
+                 detail={"group_id": str(group_id), "role": role_name})
+    await db.flush()
+    return await get_group_roles(db, group_id)

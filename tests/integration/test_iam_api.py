@@ -205,3 +205,90 @@ class TestAdminUserManagement:
         )
         assert resp.status_code == 404
         await _cleanup(iam, target)
+
+
+# ── Groups admin ──────────────────────────────────────────
+
+class TestGroupAdmin:
+    @pytest.mark.asyncio
+    async def test_plain_user_cannot_manage_groups(self, client, iam):
+        uid = await _make_user(iam, roles=["user"])
+        _act_as(uid)
+        resp = await client.get("/api/v1/admin/groups")
+        assert resp.status_code == 403
+        await _cleanup(iam, uid)
+
+    @pytest.mark.asyncio
+    async def test_group_lifecycle_confers_permissions(self, client, iam):
+        member = await _make_user(iam, roles=["user"])
+        _act_as(DEFAULT_OWNER)
+
+        # Create a group, attach the `admin` role, add the member.
+        resp = await client.post("/api/v1/admin/groups", json={"name": f"beta-{uuid.uuid4()}"})
+        assert resp.status_code == 201
+        gid = resp.json()["id"]
+
+        resp = await client.post(f"/api/v1/admin/groups/{gid}/roles", json={"role": "admin"})
+        assert resp.status_code == 200
+        assert resp.json()["roles"] == ["admin"]
+
+        resp = await client.post(
+            f"/api/v1/admin/groups/{gid}/members", json={"user_id": str(member)}
+        )
+        assert resp.status_code == 200
+        assert str(member) in resp.json()["member_ids"]
+
+        # The member now has admin via the group — /auth/me reflects it.
+        _act_as(member)
+        me = (await client.get("/api/v1/auth/me")).json()
+        assert "admin" in me["roles"]
+        assert Permissions.USERS_MANAGE in me["permissions"]
+        # ...and can actually hit an admin route now.
+        assert (await client.get("/api/v1/admin/users")).status_code == 200
+
+        # Remove the member → admin access is gone.
+        _act_as(DEFAULT_OWNER)
+        resp = await client.delete(f"/api/v1/admin/groups/{gid}/members/{member}")
+        assert resp.status_code == 200
+        _act_as(member)
+        assert (await client.get("/api/v1/admin/users")).status_code == 403
+
+        # Detail + delete (cascade) as admin.
+        _act_as(DEFAULT_OWNER)
+        detail = (await client.get(f"/api/v1/admin/groups/{gid}")).json()
+        assert detail["roles"] == ["admin"]
+        assert (await client.delete(f"/api/v1/admin/groups/{gid}")).status_code == 204
+
+        await _cleanup(iam, member)
+
+    @pytest.mark.asyncio
+    async def test_duplicate_group_name_409(self, client, iam):
+        _act_as(DEFAULT_OWNER)
+        name = f"dupe-{uuid.uuid4()}"
+        assert (await client.post("/api/v1/admin/groups", json={"name": name})).status_code == 201
+        resp = await client.post("/api/v1/admin/groups", json={"name": name})
+        assert resp.status_code == 409
+        # Message names the right resource ("group"), not the legacy "application".
+        assert "group" in resp.json()["detail"].lower()
+        # cleanup the created group
+        gid = (await client.get("/api/v1/admin/groups")).json()
+        for g in gid:
+            if g["name"] == name:
+                await client.delete(f"/api/v1/admin/groups/{g['id']}")
+
+    @pytest.mark.asyncio
+    async def test_group_ops_write_audit(self, client, iam):
+        _act_as(DEFAULT_OWNER)
+        resp = await client.post("/api/v1/admin/groups", json={"name": f"aud-{uuid.uuid4()}"})
+        gid = resp.json()["id"]
+        await client.post(f"/api/v1/admin/groups/{gid}/roles", json={"role": "support"})
+
+        async with iam() as s:
+            rows = (await s.execute(text(
+                "SELECT action FROM iam_audit_log WHERE detail->>'group_id' = :g OR action = 'group.create'"
+            ).bindparams(g=gid))).all()
+        actions = {r[0] for r in rows}
+        assert "group.create" in actions
+        assert "group.grant_role" in actions
+
+        await client.delete(f"/api/v1/admin/groups/{gid}")
