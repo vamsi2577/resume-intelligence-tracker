@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
@@ -55,12 +55,24 @@ async def request_login(db: AsyncSession, email: str) -> str:
     """Create a login token for `email` and return the RAW token (the caller
     builds + sends the link). Only the hash is persisted."""
     email = _normalize_email(email)
+
+    # Opportunistic hygiene: drop this email's stale tokens (already consumed,
+    # or past expiry) so the table doesn't grow unbounded. Only dead rows are
+    # removed — any still-valid outstanding link is left intact.
+    now = _utcnow()
+    await db.execute(
+        delete(LoginToken).where(
+            LoginToken.email == email,
+            or_(LoginToken.consumed_at.is_not(None), LoginToken.expires_at <= now),
+        )
+    )
+
     raw = secrets.token_urlsafe(32)
     token = LoginToken(
         id=uuid.uuid4(),
         email=email,
         token_hash=_hash_token(raw),
-        expires_at=_utcnow() + timedelta(minutes=settings.MAGIC_LINK_TTL_MIN),
+        expires_at=now + timedelta(minutes=settings.MAGIC_LINK_TTL_MIN),
     )
     db.add(token)
     await db.flush()
@@ -72,8 +84,13 @@ async def verify_login(db: AsyncSession, email: str, raw_token: str) -> User:
     user. Raises UnauthorizedError on any failure (no detail on *why*, to
     avoid an oracle)."""
     email = _normalize_email(email)
+    # Lock the token row (FOR UPDATE) so two concurrent verifies of the same
+    # link can't both pass the single-use check: the second waits for the first
+    # to commit consumed_at, then sees it set and is rejected below.
     row = (await db.execute(
-        select(LoginToken).where(LoginToken.token_hash == _hash_token(raw_token))
+        select(LoginToken)
+        .where(LoginToken.token_hash == _hash_token(raw_token))
+        .with_for_update()
     )).scalar_one_or_none()
 
     if (

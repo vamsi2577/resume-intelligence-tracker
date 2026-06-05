@@ -86,6 +86,36 @@ class TestRequestLink:
         resp = await client.post("/api/v1/auth/request-link", json={"email": "not-an-email"})
         assert resp.status_code == 422
 
+    @pytest.mark.asyncio
+    async def test_purges_stale_tokens_for_email(self, client, authdb):
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        # Seed one consumed and one expired token for this email.
+        async with authdb() as s:
+            from src.models.login_token import LoginToken
+
+            s.add(LoginToken(
+                id=uuid.uuid4(), email=email, token_hash="a" * 64,
+                expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
+                consumed_at=datetime.now(timezone.utc),
+            ))
+            s.add(LoginToken(
+                id=uuid.uuid4(), email=email, token_hash="b" * 64,
+                expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            ))
+            await s.commit()
+
+        resp = await client.post("/api/v1/auth/request-link", json={"email": email})
+        assert resp.status_code == 200
+
+        # Stale rows purged; exactly one fresh, unconsumed, unexpired token left.
+        async with authdb() as s:
+            rows = (await s.execute(text(
+                "SELECT consumed_at, expires_at FROM login_tokens WHERE email = :e"
+            ).bindparams(e=email))).all()
+        assert len(rows) == 1
+        assert rows[0][0] is None  # not consumed
+        assert rows[0][1] > datetime.now(timezone.utc)  # not expired
+
 
 # ── verify ────────────────────────────────────────────────
 
@@ -189,6 +219,28 @@ class TestSession:
         )
         assert resp.status_code == 200
         assert resp.json()["user_id"] == uid
+
+    @pytest.mark.asyncio
+    async def test_require_auth_on_rejects_deactivated_user(self, client, authdb, monkeypatch):
+        # A valid cookie for a now-deactivated account must be rejected (401),
+        # not honored until the JWT expires.
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        raw = await _raw_token_for(authdb, email)
+        verify = await client.get(f"/api/v1/auth/verify?token={raw}&email={email}")
+        cookie = verify.cookies[settings.SESSION_COOKIE_NAME]
+
+        async with authdb() as s:
+            await s.execute(text(
+                "UPDATE users SET is_active = false WHERE email = :e"
+            ).bindparams(e=email))
+            await s.commit()
+
+        monkeypatch.setattr(settings, "REQUIRE_AUTH", True)
+        resp = await client.get(
+            "/api/v1/auth/me",
+            cookies={settings.SESSION_COOKIE_NAME: cookie},
+        )
+        assert resp.status_code == 401
 
 
 # ── logout ────────────────────────────────────────────────
