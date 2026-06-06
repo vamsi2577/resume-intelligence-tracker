@@ -198,8 +198,15 @@ class TestVerify:
 class TestSession:
     def test_issue_and_decode_roundtrip(self):
         uid = uuid.uuid4()
-        token = auth_service.issue_session(uid)
-        assert auth_service.decode_session(token) == uid
+        token = auth_service.issue_session(uid, 3)
+        claims = auth_service.decode_session(token)
+        assert claims.user_id == uid
+        assert claims.token_version == 3
+
+    def test_decode_defaults_tv_to_zero_for_legacy_tokens(self):
+        # A token issued without an explicit tv reads back as 0 (non-breaking).
+        token = auth_service.issue_session(uuid.uuid4())
+        assert auth_service.decode_session(token).token_version == 0
 
     def test_decode_garbage_raises(self):
         from src.utils.exceptions import UnauthorizedError
@@ -267,3 +274,20 @@ class TestLogout:
         assert resp.status_code == 200
         # Set-Cookie with an expiry in the past / empty value.
         assert settings.SESSION_COOKIE_NAME in resp.headers.get("set-cookie", "")
+
+    @pytest.mark.asyncio
+    async def test_logout_all_revokes_existing_sessions(self, client, authdb, monkeypatch):
+        # Sign in, then "log out everywhere" → the same cookie is dead afterward
+        # (token_version bumped past the token's tv).
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        raw = await _raw_token_for(authdb, email)
+        verify = await client.get(f"/api/v1/auth/verify?token={raw}&email={email}")
+        cookie = verify.cookies[settings.SESSION_COOKIE_NAME]
+
+        monkeypatch.setattr(settings, "REQUIRE_AUTH", True)
+        hdr = {settings.SESSION_COOKIE_NAME: cookie}
+
+        assert (await client.get("/api/v1/auth/me", cookies=hdr)).status_code == 200
+        assert (await client.post("/api/v1/auth/logout-all", cookies=hdr)).status_code == 200
+        # Same cookie now rejected — its tv no longer matches the user's.
+        assert (await client.get("/api/v1/auth/me", cookies=hdr)).status_code == 401

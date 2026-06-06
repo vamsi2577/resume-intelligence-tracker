@@ -19,9 +19,10 @@ import hashlib
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 import jwt
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -153,21 +154,40 @@ async def _get_or_create_user(db: AsyncSession, email: str) -> User:
 
 # ── Session JWT ───────────────────────────────────────────
 
-def issue_session(user_id: uuid.UUID) -> str:
+class SessionClaims(NamedTuple):
+    user_id: uuid.UUID
+    token_version: int
+
+
+def issue_session(user_id: uuid.UUID, token_version: int = 0) -> str:
     now = _utcnow()
     payload = {
         "sub": str(user_id),
+        "tv": int(token_version),
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(days=settings.SESSION_DAYS)).timestamp()),
     }
     return jwt.encode(payload, settings.JWT_SECRET.get_secret_value(), algorithm=_JWT_ALG)
 
 
-def decode_session(token: str) -> uuid.UUID:
+def decode_session(token: str) -> SessionClaims:
+    """Decode a session JWT to its claims. `tv` defaults to 0 for tokens issued
+    before token_version existed (non-breaking). Raises UnauthorizedError on any
+    decode/validation failure."""
     try:
         payload = jwt.decode(
             token, settings.JWT_SECRET.get_secret_value(), algorithms=[_JWT_ALG]
         )
-        return uuid.UUID(payload["sub"])
+        return SessionClaims(uuid.UUID(payload["sub"]), int(payload.get("tv", 0)))
     except Exception as e:  # jwt errors, bad uuid, missing sub
         raise UnauthorizedError("Invalid session") from e
+
+
+async def bump_token_version(db: AsyncSession, user_id: uuid.UUID) -> None:
+    """Invalidate all of a user's outstanding sessions ('log out everywhere')
+    by incrementing their token_version."""
+    await db.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(token_version=User.token_version + 1)
+    )

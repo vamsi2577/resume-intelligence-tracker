@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth';
-import { fetchTokens, createToken, revokeToken } from '../services/api';
+import { fetchTokens, createToken, revokeToken, logoutAll } from '../services/api';
 
 function fmtDate(s) {
   if (!s) return '—';
@@ -88,7 +88,19 @@ export function Account() {
           <span className="lbl">Roles</span>
           <span>{(me?.roles || []).join(', ') || '—'}</span>
         </div>
-        <button className="btn-secondary" onClick={signOut}>Sign out</button>
+        <div className="account-actions">
+          <button className="btn-secondary" onClick={signOut}>Sign out</button>
+          <button
+            className="btn-link danger"
+            onClick={async () => {
+              if (!window.confirm('Sign out of all devices? Every active session (including this one) will be ended.')) return;
+              try { await logoutAll(); } catch { /* revoked anyway */ }
+              await signOut();
+            }}
+          >
+            Sign out of all devices
+          </button>
+        </div>
       </section>
 
       <section className="account-card">
