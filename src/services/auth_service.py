@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.permissions import DEFAULT_SIGNUP_ROLE
+from src.models.auth_event import AuthEvent
 from src.models.iam import Role, UserRole
 from src.models.login_token import LoginToken
 from src.models.user import User
@@ -79,6 +80,29 @@ async def request_login(db: AsyncSession, email: str) -> str:
     db.add(token)
     await db.flush()
     return raw
+
+
+async def record_auth_event(
+    db: AsyncSession,
+    event_type: str,
+    *,
+    user_id: uuid.UUID | None = None,
+    email: str | None = None,
+    ip: str | None = None,
+    detail: str | None = None,
+) -> None:
+    """Append an auth audit row on the request's session. The caller's commit
+    persists it (the failed-verify path commits explicitly so the record
+    survives the request rollback)."""
+    db.add(AuthEvent(
+        id=uuid.uuid4(),
+        event_type=event_type,
+        user_id=user_id,
+        email=_normalize_email(email) if email else None,
+        ip=ip,
+        detail=detail,
+    ))
+    await db.flush()
 
 
 async def purge_expired_login_tokens(db: AsyncSession) -> int:

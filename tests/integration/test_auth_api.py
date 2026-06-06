@@ -47,8 +47,12 @@ async def authdb():
     yield factory
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_current_owner, None)
-    # Clean up any users/tokens created by the tests.
+    # Clean up any users/tokens/events created by the tests.
     async with factory() as s:
+        await s.execute(text(
+            "DELETE FROM auth_events WHERE email LIKE '%@magic-auth.io' "
+            "OR user_id IN (SELECT id FROM users WHERE email LIKE '%@magic-auth.io')"
+        ))
         await s.execute(text("DELETE FROM users WHERE email LIKE '%@magic-auth.io'"))
         await s.execute(text("DELETE FROM login_tokens WHERE email LIKE '%@magic-auth.io'"))
         await s.commit()
@@ -285,6 +289,37 @@ class TestSession:
             cookies={settings.SESSION_COOKIE_NAME: cookie},
         )
         assert resp.status_code == 401
+
+
+# ── auth audit events ─────────────────────────────────────
+
+class TestAuditEvents:
+    async def _events(self, factory, email):
+        async with factory() as s:
+            return (await s.execute(text(
+                "SELECT event_type FROM auth_events WHERE email = :e ORDER BY created_at"
+            ).bindparams(e=email))).scalars().all()
+
+    @pytest.mark.asyncio
+    async def test_request_link_is_audited(self, client, authdb):
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        await client.post("/api/v1/auth/request-link", json={"email": email})
+        assert "login.request" in await self._events(authdb, email)
+
+    @pytest.mark.asyncio
+    async def test_verify_success_is_audited(self, client, authdb):
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        raw = await _raw_token_for(authdb, email)
+        await client.get(f"/api/v1/auth/verify?token={raw}&email={email}")
+        assert "login.verify.success" in await self._events(authdb, email)
+
+    @pytest.mark.asyncio
+    async def test_failed_verify_is_audited_and_persisted(self, client, authdb):
+        # The 401 path rolls back the request, but the audit row is committed.
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        resp = await client.get(f"/api/v1/auth/verify?token={'x' * 40}&email={email}")
+        assert resp.status_code == 401
+        assert "login.verify.fail" in await self._events(authdb, email)
 
 
 # ── login-token sweep ─────────────────────────────────────
