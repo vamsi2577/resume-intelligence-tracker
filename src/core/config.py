@@ -108,6 +108,16 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: SecretStr = SecretStr("")
     SMTP_FROM: str = "no-reply@rit.local"
 
+    # ── Rate limiting (auth endpoints) ───────────────────
+    # Throttles the unauthenticated auth endpoints to prevent email-bombing and
+    # verify hammering. In-memory / per-process (single-instance); see the
+    # Phase 5 spec for the Redis swap at scale.
+    RATE_LIMIT_ENABLED: bool = True
+    # Per-IP cap for request-link + verify, per 60s.
+    AUTH_RL_IP_PER_MINUTE: int = 20
+    # Per-email cap for request-link, per hour (stops bombing one address).
+    AUTH_RL_EMAIL_PER_HOUR: int = 10
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def assemble_db_url(cls, v: str, info) -> str:
