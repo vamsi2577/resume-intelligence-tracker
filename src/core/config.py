@@ -1,10 +1,15 @@
+import sys
 from typing import List
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
 VALID_ENVS = {"development", "e2e", "staging", "production", "test"}
+
+# The placeholder JWT secret shipped for local dev. Booting production with this
+# value is a hard error (see the production guardrail below).
+DEV_JWT_SECRET = "dev-insecure-change-me"
 
 
 class Settings(BaseSettings):
@@ -84,8 +89,9 @@ class Settings(BaseSettings):
     # required (non-breaking). True = require a valid session; unauthenticated
     # requests get 401. Flip on once the login UI is wired (later Phase 2 PR).
     REQUIRE_AUTH: bool = False
-    # HS256 signing secret for session JWTs. MUST be overridden in production.
-    JWT_SECRET: SecretStr = SecretStr("dev-insecure-change-me")
+    # HS256 signing secret for session JWTs. MUST be overridden in production
+    # (the production guardrail below refuses to boot with the dev default).
+    JWT_SECRET: SecretStr = SecretStr(DEV_JWT_SECRET)
     SESSION_DAYS: int = 30
     SESSION_COOKIE_NAME: str = "rit_session"
     # Magic-link login token lifetime.
@@ -117,6 +123,42 @@ class Settings(BaseSettings):
             f"{password}@{data.get('POSTGRES_HOST')}:"
             f"{data.get('POSTGRES_PORT')}/{data.get('POSTGRES_DB')}"
         )
+
+    @model_validator(mode="after")
+    def _production_guardrails(self):
+        """Fail fast when APP_ENV=production is started with an insecure config.
+
+        These checks only fire in production, so dev / e2e / staging / test keep
+        their convenient defaults. Security-critical misconfigurations raise (the
+        app refuses to boot); operational ones log a warning.
+        """
+        if self.APP_ENV != "production":
+            return self
+
+        fatal: list[str] = []
+        if self.JWT_SECRET.get_secret_value() == DEV_JWT_SECRET:
+            fatal.append("JWT_SECRET is still the insecure dev default — set a strong, secret value")
+        if not self.APP_BASE_URL.startswith("https://"):
+            fatal.append(f"APP_BASE_URL must use https in production (got {self.APP_BASE_URL!r})")
+        if not self.REQUIRE_AUTH:
+            fatal.append("REQUIRE_AUTH must be true in production (otherwise every request is the default owner)")
+
+        if fatal:
+            raise ValueError(
+                "Refusing to start: insecure production configuration:\n  - "
+                + "\n  - ".join(fatal)
+            )
+
+        # Operational (non-fatal): without SMTP, magic links are only logged, so
+        # nobody can actually sign in — warn loudly but don't block boot (an
+        # API-token-only or alternative-delivery deployment may be intentional).
+        if not self.SMTP_HOST:
+            print(
+                "WARNING: APP_ENV=production but SMTP_HOST is unset — magic-link "
+                "emails will be logged, not delivered.",
+                file=sys.stderr,
+            )
+        return self
 
     model_config = {"env_file": ".env", "case_sensitive": True}
 
