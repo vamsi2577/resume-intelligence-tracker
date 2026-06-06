@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     # Per-email cap for request-link, per hour (stops bombing one address).
     AUTH_RL_EMAIL_PER_HOUR: int = 10
 
+    # ── Login-token sweep ────────────────────────────────
+    # Background task that periodically deletes consumed/expired login_tokens
+    # rows (request_login also purges per-email opportunistically). Disable to
+    # run it out-of-process (cron) instead.
+    LOGIN_TOKEN_SWEEP_ENABLED: bool = True
+    LOGIN_TOKEN_SWEEP_MINUTES: int = 60
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def assemble_db_url(cls, v: str, info) -> str:
