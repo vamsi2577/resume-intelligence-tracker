@@ -213,6 +213,28 @@ class TestSession:
         with pytest.raises(UnauthorizedError):
             auth_service.decode_session("not.a.jwt")
 
+    def test_decode_falls_back_to_previous_secret_during_rotation(self, monkeypatch):
+        from pydantic import SecretStr
+        uid = uuid.uuid4()
+        # Token signed under the old secret.
+        monkeypatch.setattr(settings, "JWT_SECRET", SecretStr("old-secret"))
+        token = auth_service.issue_session(uid, 0)
+        # Rotate: new secret current, old secret retained for verify.
+        monkeypatch.setattr(settings, "JWT_SECRET", SecretStr("new-secret"))
+        monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", SecretStr("old-secret"))
+        assert auth_service.decode_session(token).user_id == uid
+
+    def test_decode_rejects_token_signed_with_unknown_secret(self, monkeypatch):
+        from pydantic import SecretStr
+        from src.utils.exceptions import UnauthorizedError
+        monkeypatch.setattr(settings, "JWT_SECRET", SecretStr("secret-A"))
+        token = auth_service.issue_session(uuid.uuid4(), 0)
+        # New current secret, no previous → the old token no longer verifies.
+        monkeypatch.setattr(settings, "JWT_SECRET", SecretStr("secret-B"))
+        monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", SecretStr(""))
+        with pytest.raises(UnauthorizedError):
+            auth_service.decode_session(token)
+
     @pytest.mark.asyncio
     async def test_require_auth_off_uses_default_owner(self, client, authdb):
         # Default config: REQUIRE_AUTH off → /auth/me works with no cookie.

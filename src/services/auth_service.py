@@ -173,14 +173,29 @@ def issue_session(user_id: uuid.UUID, token_version: int = 0) -> str:
 def decode_session(token: str) -> SessionClaims:
     """Decode a session JWT to its claims. `tv` defaults to 0 for tokens issued
     before token_version existed (non-breaking). Raises UnauthorizedError on any
-    decode/validation failure."""
-    try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET.get_secret_value(), algorithms=[_JWT_ALG]
-        )
-        return SessionClaims(uuid.UUID(payload["sub"]), int(payload.get("tv", 0)))
-    except Exception as e:  # jwt errors, bad uuid, missing sub
-        raise UnauthorizedError("Invalid session") from e
+    decode/validation failure.
+
+    During a secret rotation, a token signed with the previous secret fails the
+    signature check under the current secret; we then retry with
+    JWT_SECRET_PREVIOUS so the rotation doesn't sign everyone out. Only a
+    signature mismatch triggers the fallback — expiry / malformed / bad-claims
+    failures are final regardless of key.
+    """
+    candidates = [settings.JWT_SECRET.get_secret_value()]
+    previous = settings.JWT_SECRET_PREVIOUS.get_secret_value()
+    if previous:
+        candidates.append(previous)
+
+    for secret in candidates:
+        try:
+            payload = jwt.decode(token, secret, algorithms=[_JWT_ALG])
+            return SessionClaims(uuid.UUID(payload["sub"]), int(payload.get("tv", 0)))
+        except jwt.InvalidSignatureError:
+            continue  # maybe signed with the previous secret — try the next one
+        except Exception as e:  # expired, malformed, bad/missing sub → final
+            raise UnauthorizedError("Invalid session") from e
+
+    raise UnauthorizedError("Invalid session")
 
 
 async def bump_token_version(db: AsyncSession, user_id: uuid.UUID) -> None:
