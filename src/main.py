@@ -72,7 +72,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Resume Intelligence Tracker",
         description="Application logger and resume intelligence pipeline.",
-        version="0.4.1",
+        version="0.4.2",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,
