@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_owner
 from src.core.config import settings
 from src.db.session import get_db
+from src.utils.ratelimit import auth_limiter, client_ip
 from src.schemas.api_token import (
     CreateTokenRequest,
     CreateTokenResponse,
@@ -33,8 +34,22 @@ from src.utils.email import send_email
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
-def _set_session_cookie(response: Response, user_id: uuid.UUID) -> None:
-    token = auth_service.issue_session(user_id)
+def _rate_limit(key: str, limit: int, window_sec: int) -> None:
+    """Raise 429 (with Retry-After) when `key` exceeds `limit` per `window_sec`.
+    No-op when RATE_LIMIT_ENABLED is off (e.g. tests)."""
+    if not settings.RATE_LIMIT_ENABLED:
+        return
+    allowed, retry = auth_limiter.hit(key, limit, window_sec)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please try again later.",
+            headers={"Retry-After": str(retry)},
+        )
+
+
+def _set_session_cookie(response: Response, user_id: uuid.UUID, token_version: int = 0) -> None:
+    token = auth_service.issue_session(user_id, token_version)
     response.set_cookie(
         key=settings.SESSION_COOKIE_NAME,
         value=token,
@@ -50,6 +65,7 @@ def _set_session_cookie(response: Response, user_id: uuid.UUID) -> None:
 async def request_link(
     body: RequestLinkRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> RequestLinkResponse:
     """Email a magic sign-in link. Always returns the same generic response so
@@ -58,6 +74,11 @@ async def request_link(
     The actual send is queued as a background task so the synchronous SMTP
     handshake never blocks the event loop (and never affects response timing,
     which would otherwise leak account existence)."""
+    # Throttle per-IP and per-email to stop email-bombing. The per-email 429
+    # reveals only that the address was requested a lot (by anyone), not whether
+    # it has an account, so it doesn't undo the generic-response design.
+    _rate_limit(f"reqlink:ip:{client_ip(request)}", settings.AUTH_RL_IP_PER_MINUTE, 60)
+    _rate_limit(f"reqlink:email:{body.email.strip().lower()}", settings.AUTH_RL_EMAIL_PER_HOUR, 3600)
     raw = await auth_service.request_login(db, body.email)
     link = f"{settings.APP_BASE_URL}/login/verify?token={raw}&email={body.email}"
     background_tasks.add_task(
@@ -71,6 +92,7 @@ async def request_link(
 
 @router.get("/verify", response_model=VerifyResponse)
 async def verify(
+    request: Request,
     response: Response,
     token: str = Query(..., min_length=10),
     email: str = Query(...),
@@ -78,13 +100,28 @@ async def verify(
 ) -> VerifyResponse:
     """Consume a magic-link token, (auto-)create the user, and set the session
     cookie. Raises 401 on an invalid/expired/used link."""
+    _rate_limit(f"verify:ip:{client_ip(request)}", settings.AUTH_RL_IP_PER_MINUTE, 60)
     user = await auth_service.verify_login(db, email, token)
-    _set_session_cookie(response, user.id)
+    _set_session_cookie(response, user.id, user.token_version)
     return VerifyResponse(user_id=user.id, email=user.email)
 
 
 @router.post("/logout")
 async def logout(response: Response) -> dict:
+    response.delete_cookie(settings.SESSION_COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+@router.post("/logout-all")
+async def logout_all(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
+) -> dict:
+    """Revoke every outstanding session for the caller (bumps token_version),
+    including this one, and clear the local cookie. Use after a suspected
+    compromise or on 'sign out of all devices'."""
+    await auth_service.bump_token_version(db, owner_id)
     response.delete_cookie(settings.SESSION_COOKIE_NAME, path="/")
     return {"ok": True}
 
