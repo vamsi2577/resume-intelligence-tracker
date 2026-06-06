@@ -81,6 +81,19 @@ async def request_login(db: AsyncSession, email: str) -> str:
     return raw
 
 
+async def purge_expired_login_tokens(db: AsyncSession) -> int:
+    """Delete all consumed or expired login tokens. Complements the per-email
+    cleanup in request_login with a global sweep (run periodically). Returns the
+    number of rows removed."""
+    now = _utcnow()
+    result = await db.execute(
+        delete(LoginToken).where(
+            or_(LoginToken.consumed_at.is_not(None), LoginToken.expires_at <= now)
+        )
+    )
+    return result.rowcount or 0
+
+
 async def verify_login(db: AsyncSession, email: str, raw_token: str) -> User:
     """Validate and consume a login token; return the (created or existing)
     user. Raises UnauthorizedError on any failure (no detail on *why*, to

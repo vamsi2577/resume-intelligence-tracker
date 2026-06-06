@@ -287,6 +287,35 @@ class TestSession:
         assert resp.status_code == 401
 
 
+# ── login-token sweep ─────────────────────────────────────
+
+class TestSweep:
+    @pytest.mark.asyncio
+    async def test_purge_removes_consumed_and_expired_keeps_live(self, authdb):
+        from src.models.login_token import LoginToken
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        now = datetime.now(timezone.utc)
+        async with authdb() as s:
+            s.add(LoginToken(id=uuid.uuid4(), email=email, token_hash="c" * 64,
+                             expires_at=now + timedelta(minutes=15), consumed_at=now))  # consumed
+            s.add(LoginToken(id=uuid.uuid4(), email=email, token_hash="e" * 64,
+                             expires_at=now - timedelta(minutes=1)))                    # expired
+            s.add(LoginToken(id=uuid.uuid4(), email=email, token_hash="l" * 64,
+                             expires_at=now + timedelta(minutes=15)))                   # live
+            await s.commit()
+
+        async with authdb() as s:
+            removed = await auth_service.purge_expired_login_tokens(s)
+            await s.commit()
+        assert removed >= 2  # at least our consumed + expired (global sweep)
+
+        async with authdb() as s:
+            rows = (await s.execute(text(
+                "SELECT token_hash FROM login_tokens WHERE email = :e"
+            ).bindparams(e=email))).all()
+        assert [r[0] for r in rows] == ["l" * 64]  # only the live token survives
+
+
 # ── logout ────────────────────────────────────────────────
 
 class TestLogout:
