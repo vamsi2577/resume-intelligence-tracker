@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,11 +30,41 @@ from src.utils.exceptions import (
 logger = get_logger(__name__)
 
 
+async def _login_token_sweep_loop() -> None:
+    """Periodically delete consumed/expired login tokens so the table can't grow
+    unbounded. Best-effort: a failed sweep is logged and retried next tick."""
+    from src.db.session import AsyncSessionFactory
+    from src.services import auth_service
+
+    interval = max(1, settings.LOGIN_TOKEN_SWEEP_MINUTES) * 60
+    while True:
+        try:
+            async with AsyncSessionFactory() as db:
+                removed = await auth_service.purge_expired_login_tokens(db)
+                await db.commit()
+            if removed:
+                logger.info("Swept expired login tokens", extra={"count": removed})
+        except Exception:
+            logger.error("Login-token sweep failed", exc_info=True)
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_root_logger(settings.LOG_LEVEL)
     logger.info("Starting Resume Intelligence Tracker", extra={"env": settings.APP_ENV})
+
+    sweep_task: asyncio.Task | None = None
+    if settings.LOGIN_TOKEN_SWEEP_ENABLED:
+        sweep_task = asyncio.create_task(_login_token_sweep_loop())
+        logger.info("Login-token sweep enabled", extra={"every_min": settings.LOGIN_TOKEN_SWEEP_MINUTES})
+
     yield
+
+    if sweep_task is not None:
+        sweep_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweep_task
     logger.info("Shutting down Resume Intelligence Tracker")
 
 
@@ -41,7 +72,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Resume Intelligence Tracker",
         description="Application logger and resume intelligence pipeline.",
-        version="0.4.1",
+        version="0.4.2",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,

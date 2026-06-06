@@ -47,8 +47,12 @@ async def authdb():
     yield factory
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_current_owner, None)
-    # Clean up any users/tokens created by the tests.
+    # Clean up any users/tokens/events created by the tests.
     async with factory() as s:
+        await s.execute(text(
+            "DELETE FROM auth_events WHERE email LIKE '%@magic-auth.io' "
+            "OR user_id IN (SELECT id FROM users WHERE email LIKE '%@magic-auth.io')"
+        ))
         await s.execute(text("DELETE FROM users WHERE email LIKE '%@magic-auth.io'"))
         await s.execute(text("DELETE FROM login_tokens WHERE email LIKE '%@magic-auth.io'"))
         await s.commit()
@@ -213,6 +217,28 @@ class TestSession:
         with pytest.raises(UnauthorizedError):
             auth_service.decode_session("not.a.jwt")
 
+    def test_decode_falls_back_to_previous_secret_during_rotation(self, monkeypatch):
+        from pydantic import SecretStr
+        uid = uuid.uuid4()
+        # Token signed under the old secret.
+        monkeypatch.setattr(settings, "JWT_SECRET", SecretStr("old-secret"))
+        token = auth_service.issue_session(uid, 0)
+        # Rotate: new secret current, old secret retained for verify.
+        monkeypatch.setattr(settings, "JWT_SECRET", SecretStr("new-secret"))
+        monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", SecretStr("old-secret"))
+        assert auth_service.decode_session(token).user_id == uid
+
+    def test_decode_rejects_token_signed_with_unknown_secret(self, monkeypatch):
+        from pydantic import SecretStr
+        from src.utils.exceptions import UnauthorizedError
+        monkeypatch.setattr(settings, "JWT_SECRET", SecretStr("secret-A"))
+        token = auth_service.issue_session(uuid.uuid4(), 0)
+        # New current secret, no previous → the old token no longer verifies.
+        monkeypatch.setattr(settings, "JWT_SECRET", SecretStr("secret-B"))
+        monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", SecretStr(""))
+        with pytest.raises(UnauthorizedError):
+            auth_service.decode_session(token)
+
     @pytest.mark.asyncio
     async def test_require_auth_off_uses_default_owner(self, client, authdb):
         # Default config: REQUIRE_AUTH off → /auth/me works with no cookie.
@@ -263,6 +289,66 @@ class TestSession:
             cookies={settings.SESSION_COOKIE_NAME: cookie},
         )
         assert resp.status_code == 401
+
+
+# ── auth audit events ─────────────────────────────────────
+
+class TestAuditEvents:
+    async def _events(self, factory, email):
+        async with factory() as s:
+            return (await s.execute(text(
+                "SELECT event_type FROM auth_events WHERE email = :e ORDER BY created_at"
+            ).bindparams(e=email))).scalars().all()
+
+    @pytest.mark.asyncio
+    async def test_request_link_is_audited(self, client, authdb):
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        await client.post("/api/v1/auth/request-link", json={"email": email})
+        assert "login.request" in await self._events(authdb, email)
+
+    @pytest.mark.asyncio
+    async def test_verify_success_is_audited(self, client, authdb):
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        raw = await _raw_token_for(authdb, email)
+        await client.get(f"/api/v1/auth/verify?token={raw}&email={email}")
+        assert "login.verify.success" in await self._events(authdb, email)
+
+    @pytest.mark.asyncio
+    async def test_failed_verify_is_audited_and_persisted(self, client, authdb):
+        # The 401 path rolls back the request, but the audit row is committed.
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        resp = await client.get(f"/api/v1/auth/verify?token={'x' * 40}&email={email}")
+        assert resp.status_code == 401
+        assert "login.verify.fail" in await self._events(authdb, email)
+
+
+# ── login-token sweep ─────────────────────────────────────
+
+class TestSweep:
+    @pytest.mark.asyncio
+    async def test_purge_removes_consumed_and_expired_keeps_live(self, authdb):
+        from src.models.login_token import LoginToken
+        email = f"{uuid.uuid4()}@magic-auth.io"
+        now = datetime.now(timezone.utc)
+        async with authdb() as s:
+            s.add(LoginToken(id=uuid.uuid4(), email=email, token_hash="c" * 64,
+                             expires_at=now + timedelta(minutes=15), consumed_at=now))  # consumed
+            s.add(LoginToken(id=uuid.uuid4(), email=email, token_hash="e" * 64,
+                             expires_at=now - timedelta(minutes=1)))                    # expired
+            s.add(LoginToken(id=uuid.uuid4(), email=email, token_hash="l" * 64,
+                             expires_at=now + timedelta(minutes=15)))                   # live
+            await s.commit()
+
+        async with authdb() as s:
+            removed = await auth_service.purge_expired_login_tokens(s)
+            await s.commit()
+        assert removed >= 2  # at least our consumed + expired (global sweep)
+
+        async with authdb() as s:
+            rows = (await s.execute(text(
+                "SELECT token_hash FROM login_tokens WHERE email = :e"
+            ).bindparams(e=email))).all()
+        assert [r[0] for r in rows] == ["l" * 64]  # only the live token survives
 
 
 # ── logout ────────────────────────────────────────────────

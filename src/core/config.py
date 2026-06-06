@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     # HS256 signing secret for session JWTs. MUST be overridden in production
     # (the production guardrail below refuses to boot with the dev default).
     JWT_SECRET: SecretStr = SecretStr(DEV_JWT_SECRET)
+    # Previous signing secret, kept for verify-only during a rotation: tokens
+    # are always signed with JWT_SECRET, but decode falls back to this one so a
+    # secret swap doesn't invalidate everyone's session. Blank = no rotation in
+    # progress. Drop it after one SESSION_DAYS window.
+    JWT_SECRET_PREVIOUS: SecretStr = SecretStr("")
     SESSION_DAYS: int = 30
     SESSION_COOKIE_NAME: str = "rit_session"
     # Magic-link login token lifetime.
@@ -117,6 +122,13 @@ class Settings(BaseSettings):
     AUTH_RL_IP_PER_MINUTE: int = 20
     # Per-email cap for request-link, per hour (stops bombing one address).
     AUTH_RL_EMAIL_PER_HOUR: int = 10
+
+    # ── Login-token sweep ────────────────────────────────
+    # Background task that periodically deletes consumed/expired login_tokens
+    # rows (request_login also purges per-email opportunistically). Disable to
+    # run it out-of-process (cron) instead.
+    LOGIN_TOKEN_SWEEP_ENABLED: bool = True
+    LOGIN_TOKEN_SWEEP_MINUTES: int = 60
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
@@ -148,6 +160,8 @@ class Settings(BaseSettings):
         fatal: list[str] = []
         if self.JWT_SECRET.get_secret_value() == DEV_JWT_SECRET:
             fatal.append("JWT_SECRET is still the insecure dev default — set a strong, secret value")
+        if self.JWT_SECRET_PREVIOUS.get_secret_value() == DEV_JWT_SECRET:
+            fatal.append("JWT_SECRET_PREVIOUS is the insecure dev default — clear it or set a real prior secret")
         if not self.APP_BASE_URL.startswith("https://"):
             fatal.append(f"APP_BASE_URL must use https in production (got {self.APP_BASE_URL!r})")
         if not self.REQUIRE_AUTH:

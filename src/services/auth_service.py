@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.permissions import DEFAULT_SIGNUP_ROLE
+from src.models.auth_event import AuthEvent
 from src.models.iam import Role, UserRole
 from src.models.login_token import LoginToken
 from src.models.user import User
@@ -79,6 +80,42 @@ async def request_login(db: AsyncSession, email: str) -> str:
     db.add(token)
     await db.flush()
     return raw
+
+
+async def record_auth_event(
+    db: AsyncSession,
+    event_type: str,
+    *,
+    user_id: uuid.UUID | None = None,
+    email: str | None = None,
+    ip: str | None = None,
+    detail: str | None = None,
+) -> None:
+    """Append an auth audit row on the request's session. The caller's commit
+    persists it (the failed-verify path commits explicitly so the record
+    survives the request rollback)."""
+    db.add(AuthEvent(
+        id=uuid.uuid4(),
+        event_type=event_type,
+        user_id=user_id,
+        email=_normalize_email(email) if email else None,
+        ip=ip,
+        detail=detail,
+    ))
+    await db.flush()
+
+
+async def purge_expired_login_tokens(db: AsyncSession) -> int:
+    """Delete all consumed or expired login tokens. Complements the per-email
+    cleanup in request_login with a global sweep (run periodically). Returns the
+    number of rows removed."""
+    now = _utcnow()
+    result = await db.execute(
+        delete(LoginToken).where(
+            or_(LoginToken.consumed_at.is_not(None), LoginToken.expires_at <= now)
+        )
+    )
+    return result.rowcount or 0
 
 
 async def verify_login(db: AsyncSession, email: str, raw_token: str) -> User:
@@ -173,14 +210,29 @@ def issue_session(user_id: uuid.UUID, token_version: int = 0) -> str:
 def decode_session(token: str) -> SessionClaims:
     """Decode a session JWT to its claims. `tv` defaults to 0 for tokens issued
     before token_version existed (non-breaking). Raises UnauthorizedError on any
-    decode/validation failure."""
-    try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET.get_secret_value(), algorithms=[_JWT_ALG]
-        )
-        return SessionClaims(uuid.UUID(payload["sub"]), int(payload.get("tv", 0)))
-    except Exception as e:  # jwt errors, bad uuid, missing sub
-        raise UnauthorizedError("Invalid session") from e
+    decode/validation failure.
+
+    During a secret rotation, a token signed with the previous secret fails the
+    signature check under the current secret; we then retry with
+    JWT_SECRET_PREVIOUS so the rotation doesn't sign everyone out. Only a
+    signature mismatch triggers the fallback — expiry / malformed / bad-claims
+    failures are final regardless of key.
+    """
+    candidates = [settings.JWT_SECRET.get_secret_value()]
+    previous = settings.JWT_SECRET_PREVIOUS.get_secret_value()
+    if previous:
+        candidates.append(previous)
+
+    for secret in candidates:
+        try:
+            payload = jwt.decode(token, secret, algorithms=[_JWT_ALG])
+            return SessionClaims(uuid.UUID(payload["sub"]), int(payload.get("tv", 0)))
+        except jwt.InvalidSignatureError:
+            continue  # maybe signed with the previous secret — try the next one
+        except Exception as e:  # expired, malformed, bad/missing sub → final
+            raise UnauthorizedError("Invalid session") from e
+
+    raise UnauthorizedError("Invalid session")
 
 
 async def bump_token_version(db: AsyncSession, user_id: uuid.UUID) -> None:

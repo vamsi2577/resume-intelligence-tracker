@@ -43,6 +43,11 @@ def test_rejects_non_https_base_url_in_production():
         _settings(APP_BASE_URL="http://rit.example.com")
 
 
+def test_rejects_dev_previous_secret_in_production():
+    with pytest.raises(ValueError, match="JWT_SECRET_PREVIOUS"):
+        _settings(JWT_SECRET_PREVIOUS=SecretStr(DEV_JWT_SECRET))
+
+
 def test_rejects_auth_off_in_production():
     with pytest.raises(ValueError, match="REQUIRE_AUTH"):
         _settings(REQUIRE_AUTH=False)
