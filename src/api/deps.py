@@ -56,13 +56,15 @@ async def get_current_owner(
     if not token:
         raise UnauthorizedError("Authentication required")
 
-    user_id = auth_service.decode_session(token)
+    claims = auth_service.decode_session(token)
     user = (
-        await db.execute(select(User).where(User.id == user_id))
+        await db.execute(select(User).where(User.id == claims.user_id))
     ).scalar_one_or_none()
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.token_version != claims.token_version:
+        # Unknown/deactivated user, or the session was revoked via
+        # token_version bump ("log out everywhere").
         raise UnauthorizedError("Session is no longer valid")
-    return user_id
+    return claims.user_id
 
 
 def _extract_bearer(request: Request) -> str | None:

@@ -198,6 +198,12 @@ export function logout() {
   return request('/auth/logout', { method: 'POST' });
 }
 
+// Revoke every session for the current user (bumps token_version server-side),
+// including this one. Used by "Sign out of all devices".
+export function logoutAll() {
+  return request('/auth/logout-all', { method: 'POST' });
+}
+
 // ── Personal API tokens (Phase 2) ────────────────────────
 // Long-lived bearer credentials for non-browser clients (the H1B Scout
 // extension). The raw secret is returned exactly once, on create.

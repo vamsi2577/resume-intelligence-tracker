@@ -48,8 +48,8 @@ def _rate_limit(key: str, limit: int, window_sec: int) -> None:
         )
 
 
-def _set_session_cookie(response: Response, user_id: uuid.UUID) -> None:
-    token = auth_service.issue_session(user_id)
+def _set_session_cookie(response: Response, user_id: uuid.UUID, token_version: int = 0) -> None:
+    token = auth_service.issue_session(user_id, token_version)
     response.set_cookie(
         key=settings.SESSION_COOKIE_NAME,
         value=token,
@@ -102,12 +102,26 @@ async def verify(
     cookie. Raises 401 on an invalid/expired/used link."""
     _rate_limit(f"verify:ip:{client_ip(request)}", settings.AUTH_RL_IP_PER_MINUTE, 60)
     user = await auth_service.verify_login(db, email, token)
-    _set_session_cookie(response, user.id)
+    _set_session_cookie(response, user.id, user.token_version)
     return VerifyResponse(user_id=user.id, email=user.email)
 
 
 @router.post("/logout")
 async def logout(response: Response) -> dict:
+    response.delete_cookie(settings.SESSION_COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+@router.post("/logout-all")
+async def logout_all(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    owner_id: uuid.UUID = Depends(get_current_owner),
+) -> dict:
+    """Revoke every outstanding session for the caller (bumps token_version),
+    including this one, and clear the local cookie. Use after a suspected
+    compromise or on 'sign out of all devices'."""
+    await auth_service.bump_token_version(db, owner_id)
     response.delete_cookie(settings.SESSION_COOKIE_NAME, path="/")
     return {"ok": True}
 

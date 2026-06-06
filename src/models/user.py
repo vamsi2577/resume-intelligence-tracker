@@ -38,6 +38,15 @@ class User(Base):
         sa.Boolean, nullable=False, default=True, server_default="true"
     )
 
+    # Session-revocation counter. Embedded in each session JWT as `tv`; a
+    # request is rejected when the token's `tv` != this value. Bumping it
+    # invalidates every outstanding session ("log out everywhere") without a
+    # server-side session store. Default 0 — pre-existing tokens carry no `tv`
+    # and are read as 0, so this is non-breaking.
+    token_version: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=0, server_default="0"
+    )
+
     __table_args__ = (
         Index("ux_users_email", sa.text("lower(email)"), unique=True),
     )
