@@ -24,6 +24,7 @@ from src.models.iam import (
 )
 from src.models.login_token import LoginToken
 from src.models.api_token import ApiToken
+from src.models.auth_event import AuthEvent
 
 __all__ = [
     "User",
@@ -41,4 +42,5 @@ __all__ = [
     "IamAuditLog",
     "LoginToken",
     "ApiToken",
+    "AuthEvent",
 ]

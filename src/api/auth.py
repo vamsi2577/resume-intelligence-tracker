@@ -30,6 +30,7 @@ from src.schemas.auth import RequestLinkRequest, RequestLinkResponse, VerifyResp
 from src.schemas.iam import MeResponse
 from src.services import auth_service, iam_service, token_service
 from src.utils.email import send_email
+from src.utils.exceptions import UnauthorizedError
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -77,9 +78,11 @@ async def request_link(
     # Throttle per-IP and per-email to stop email-bombing. The per-email 429
     # reveals only that the address was requested a lot (by anyone), not whether
     # it has an account, so it doesn't undo the generic-response design.
-    _rate_limit(f"reqlink:ip:{client_ip(request)}", settings.AUTH_RL_IP_PER_MINUTE, 60)
+    ip = client_ip(request)
+    _rate_limit(f"reqlink:ip:{ip}", settings.AUTH_RL_IP_PER_MINUTE, 60)
     _rate_limit(f"reqlink:email:{body.email.strip().lower()}", settings.AUTH_RL_EMAIL_PER_HOUR, 3600)
     raw = await auth_service.request_login(db, body.email)
+    await auth_service.record_auth_event(db, "login.request", email=body.email, ip=ip)
     link = f"{settings.APP_BASE_URL}/login/verify?token={raw}&email={body.email}"
     background_tasks.add_task(
         send_email,
@@ -100,8 +103,17 @@ async def verify(
 ) -> VerifyResponse:
     """Consume a magic-link token, (auto-)create the user, and set the session
     cookie. Raises 401 on an invalid/expired/used link."""
-    _rate_limit(f"verify:ip:{client_ip(request)}", settings.AUTH_RL_IP_PER_MINUTE, 60)
-    user = await auth_service.verify_login(db, email, token)
+    ip = client_ip(request)
+    _rate_limit(f"verify:ip:{ip}", settings.AUTH_RL_IP_PER_MINUTE, 60)
+    try:
+        user = await auth_service.verify_login(db, email, token)
+    except UnauthorizedError:
+        # Record the failed attempt and commit it, since the failure path is
+        # otherwise rolled back by the get_db dependency.
+        await auth_service.record_auth_event(db, "login.verify.fail", email=email, ip=ip)
+        await db.commit()
+        raise
+    await auth_service.record_auth_event(db, "login.verify.success", user_id=user.id, email=user.email, ip=ip)
     _set_session_cookie(response, user.id, user.token_version)
     return VerifyResponse(user_id=user.id, email=user.email)
 
@@ -114,6 +126,7 @@ async def logout(response: Response) -> dict:
 
 @router.post("/logout-all")
 async def logout_all(
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
     owner_id: uuid.UUID = Depends(get_current_owner),
@@ -122,6 +135,7 @@ async def logout_all(
     including this one, and clear the local cookie. Use after a suspected
     compromise or on 'sign out of all devices'."""
     await auth_service.bump_token_version(db, owner_id)
+    await auth_service.record_auth_event(db, "logout.all", user_id=owner_id, ip=client_ip(request))
     response.delete_cookie(settings.SESSION_COOKIE_NAME, path="/")
     return {"ok": True}
 
@@ -163,6 +177,9 @@ async def create_token(
     token, raw = await token_service.create_token(
         db, owner_id, body.name, body.expires_in_days
     )
+    await auth_service.record_auth_event(
+        db, "token.create", user_id=owner_id, detail=f"{token.token_prefix} ({token.name})"
+    )
     return CreateTokenResponse(token=raw, **TokenInfo.model_validate(token).model_dump())
 
 
@@ -184,4 +201,5 @@ async def revoke_token(
     """Revoke one of the caller's tokens. 404 if it doesn't exist or belongs to
     someone else."""
     await token_service.revoke_token(db, owner_id, token_id)
+    await auth_service.record_auth_event(db, "token.revoke", user_id=owner_id, detail=str(token_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
